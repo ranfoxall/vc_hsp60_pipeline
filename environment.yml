@@ -1,0 +1,32 @@
+name: vc_hsp60_pipeline
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base=4.5
+  - r-optparse
+  - r-dplyr
+  - r-magrittr
+  - r-tidyr
+  - r-ggplot2
+  - r-remotes
+  - r-data.table
+  - r-igraph
+  - r-latticeextra
+  - r-mass
+  - r-mgcv
+  - r-png
+  - r-biocmanager
+  # System libraries required for Bioconductor package compilation
+  - xz              # provides lzma.h (fixes: fatal error lzma.h not found)
+  - zlib
+  - bzip2
+  - curl
+  - openssl
+  - mamba           # faster solver, needed for bioconductor-rhdf5filters
+  # HDF5 packages installed via conda to avoid C compiler conflicts
+  - bioconductor-rhdf5filters
+  - bioconductor-rhdf5
+  - bioconductor-biomformat
+  - bioconductor-phyloseq

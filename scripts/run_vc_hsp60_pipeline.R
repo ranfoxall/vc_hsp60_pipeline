@@ -49,24 +49,41 @@ names(fnFs) <- sample_names
 names(fnRs) <- sample_names
 
 # ----------------------
-# 3. Adaptive truncation from quality scores
+# 3. Adaptive truncation with minimum length safeguard
 # ----------------------
-cat("Generating quality profiles...\n")
-pdf(file=paste0(output_prefix, "_quality_profiles.pdf"))
-plotQualityProfile(fnFs[1:min(3, length(fnFs))])
-plotQualityProfile(fnRs[1:min(3, length(fnRs))])
-dev.off()
 
-get_trunc <- function(fn_list) {
-  qs <- quality(readFastq(fn_list[1]))
+get_trunc <- function(fn_list, min_len = 200, qual_threshold = 30) {
+
+  cat("Checking first FASTQ file:\n")
+  cat("  ", basename(fn_list[1]), "\n")
+
+  fq <- readFastq(fn_list[1])
+  n_reads <- length(fq)
+  read_width <- width(fq)[1]
+  cat("  Number of reads:", n_reads, "; read width:", read_width, "\n")
+
+  qs <- as(quality(fq), "matrix")
   med_q <- apply(qs, 2, median)
-  pos <- which(med_q < 30)
-  if(length(pos) == 0) return(ncol(qs))
-  pos[1] - 1
+
+  pos <- which(med_q < qual_threshold)
+  trunc_pos <- if(length(pos) == 0) ncol(qs) else pos[1] - 1
+
+  # SAFEGUARD: do not truncate below minimum length
+  if(trunc_pos < min_len) {
+    cat("  Quality drops early, but enforcing minimum length:", min_len, "\n")
+    trunc_pos <- min_len
+  }
+
+  cat("  Final truncation position:", trunc_pos, "\n")
+  return(trunc_pos)
 }
-truncLenF <- get_trunc(fnFs)
-truncLenR <- get_trunc(fnRs)
-cat("Truncation lengths: forward =", truncLenF, ", reverse =", truncLenR, "\n")
+
+# Your enforced minimums
+truncLenF <- get_trunc(fnFs, min_len = 240)
+truncLenR <- get_trunc(fnRs, min_len = 220)
+
+cat("Truncation lengths: forward =", truncLenF,
+    ", reverse =", truncLenR, "\n")
 
 # ----------------------
 # 4. Filter reads

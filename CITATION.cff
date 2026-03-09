@@ -1,0 +1,98 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "vc_hsp60_pipeline: A Vibrio-centric hsp60 amplicon sequencing pipeline"
+version: 1.0.0
+date-released: 2026-03-01
+authors:
+  - family-names: Foxall
+    given-names: Randi
+    affiliation: "Whistler Lab, University of New Hampshire"
+  - family-names: Whistler
+    given-names: Cheryl
+    affiliation: "University of New Hampshire, Molecular Cellular and Biomedical Sciences"
+    orcid: ""
+  - family-names: Jones
+    given-names: Stephen
+    affiliation: "Department of Natural Resources and the Environment, University of New Hampshire"
+repository-code: "https://github.com/ranfoxall/vc_hsp60_pipeline"
+license: CC-BY-NC-4.0
+abstract: >
+  vc_hsp60_pipeline is an R-based pipeline for processing Vibrio-centric hsp60 amplicon
+  sequencing data using DADA2. It is designed specifically for the Vibrio-centric assay
+  (King et al. 2019, Front. Microbiol. 10:2907), which targets a hypervariable region of
+  hsp60 enriched in Vibrio spp. It is not suitable for universal hsp60 (cpn60) primers.
+  The pipeline produces ASV tables, FASTA files, and phyloseq objects, with optional
+  taxonomy classification using the cpn60 QIIME2 classifier. Developed in the Whistler
+  Lab at the University of New Hampshire.
+keywords:
+  - Vibrio
+  - Vibrio-centric
+  - hsp60
+  - amplicon sequencing
+  - DADA2
+  - microbiome
+  - cpn60
+  - QIIME2
+  - phyloseq
+funding:
+  - "New Hampshire Agricultural Experiment Station CREATE (Collaborative
+    Research Enhancement and Team Exploration) program"
+  - type: article
+    authors:
+      - family-names: Callahan
+        given-names: Benjamin J.
+      - family-names: McMurdie
+        given-names: Paul J.
+      - family-names: Rosen
+        given-names: Michael J.
+      - family-names: Han
+        given-names: Andrew W.
+      - family-names: Johnson
+        given-names: Amy Jo A.
+      - family-names: Holmes
+        given-names: Susan P.
+    title: "DADA2: High-resolution sample inference from Illumina amplicon data"
+    journal: "Nature Methods"
+    volume: 13
+    pages: "581-583"
+    year: 2016
+    doi: 10.1038/nmeth.3869
+  - type: article
+    authors:
+      - family-names: Bolyen
+        given-names: Evan
+      - family-names: Rideout
+        given-names: Jai Ram
+      - family-names: Dillon
+        given-names: Matthew R.
+      - name: "et al."
+    title: "Reproducible, interactive, scalable and extensible microbiome data science using QIIME 2"
+    journal: "Nature Biotechnology"
+    volume: 37
+    pages: "852-857"
+    year: 2019
+    doi: 10.1038/s41587-019-0209-9
+  - type: article
+    authors:
+      - family-names: Martin
+        given-names: Marcel
+    title: "Cutadapt removes adapter sequences from high-throughput sequencing reads"
+    journal: "EMBnet.journal"
+    volume: 17
+    issue: 1
+    pages: "10-12"
+    year: 2011
+    doi: 10.14806/ej.17.1.200
+  - type: article
+    authors:
+      - family-names: McMurdie
+        given-names: Paul J.
+      - family-names: Holmes
+        given-names: Susan
+    title: "phyloseq: An R Package for Reproducible Interactive Analysis and Graphics of Microbiome Census Data"
+    journal: "PLoS ONE"
+    volume: 8
+    issue: 4
+    pages: "e61217"
+    year: 2013
+    doi: 10.1371/journal.pone.0061217
