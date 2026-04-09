@@ -21,12 +21,19 @@ suppressPackageStartupMessages({
 })
 
 # [1] arguments -------------------------------------------------------
-# parse and validate command line inputs
 option_list <- list(
   make_option(c("--reads_path"), type="character", help="Path to raw FASTQ reads"),
   make_option(c("--output_prefix"), type="character", help="Prefix for output files"),
   make_option(c("--error_model"), type="character", default="loess",
-              help="Error model: 'loess' (default), 'default', or 'compare'")
+              help="Error model: 'loess' (default), 'default', or 'compare'"),
+  make_option(c("--error_model_rds"), type="character", default=NULL,
+              help="(Optional) Path to a previously saved error model .rds — skips error learning"),
+  make_option(c("--pool"), type="character", default="pseudo",
+              help="DADA2 pooling method: 'pseudo' (default, recommended), 'FALSE' (fastest), 'TRUE' (most sensitive)"),
+  make_option(c("--trim_left_f"), type="integer", default=0,
+              help="Bases to trim from 5' end of forward reads (default: 0)"),
+  make_option(c("--trim_left_r"), type="integer", default=0,
+              help="Bases to trim from 5' end of reverse reads (default: 0)")
 )
 opt <- parse_args(OptionParser(option_list=option_list))
 
@@ -38,16 +45,25 @@ if (!opt$error_model %in% c("loess", "default", "compare")) {
   stop("--error_model must be one of: loess, default, compare")
 }
 
-reads_path    <- opt$reads_path
-output_prefix <- opt$output_prefix
-error_model   <- opt$error_model
+reads_path       <- opt$reads_path
+output_prefix    <- opt$output_prefix
+error_model      <- opt$error_model
+error_model_rds  <- opt$error_model_rds
+pool_method      <- opt$pool
+trim_left_f      <- opt$trim_left_f
+trim_left_r      <- opt$trim_left_r
+if (pool_method == "TRUE")  pool_method <- TRUE
+if (pool_method == "FALSE") pool_method <- FALSE
 
 cat("Reading FASTQ files from:", reads_path, "\n")
 cat("Output prefix:", output_prefix, "\n")
 cat("Error model:", error_model, "\n")
+if (!is.null(error_model_rds)) cat("Error model RDS:", error_model_rds, "\n")
+cat("Pooling method:", pool_method, "\n")
+cat("Trim left F:", trim_left_f, "\n")
+cat("Trim left R:", trim_left_r, "\n")
 
 # [2] read files -------------------------------------------------------
-# find paired FASTQ files and extract sample names
 fnFs <- sort(list.files(reads_path, pattern="_R1_001\\.fastq\\.gz$", full.names=TRUE))
 fnRs <- sub("_R1_001\\.fastq\\.gz$", "_R2_001.fastq.gz", fnFs)
 
@@ -57,7 +73,6 @@ fnRs <- fnRs[paired]
 
 stopifnot(length(fnFs) == length(fnRs))
 
-# Robust sample name extraction: strip _S##_L###_R1_001.fastq.gz
 sample_names <- sub("_S[0-9]+_L[0-9]+_R1_001\\.fastq\\.gz$", "", basename(fnFs))
 names(fnFs) <- sample_names
 names(fnRs) <- sample_names
@@ -65,22 +80,33 @@ names(fnRs) <- sample_names
 cat("Found", length(fnFs), "samples:\n")
 print(sample_names)
 
-# [3] quality profiles and truncation lengths --------------------------
-# plot quality profiles for representative samples and auto-calculate
-# truncation lengths based on median Q30 position
+min_size <- 10000
+big_enough <- file.size(fnFs) >= min_size
+if (any(!big_enough)) {
+  small <- sample_names[!big_enough]
+  cat("WARNING: The following samples have very small input files and will be excluded before processing:\n")
+  cat(paste("  ", small, collapse="\n"), "\n")
+  fnFs         <- fnFs[big_enough]
+  fnRs         <- fnRs[big_enough]
+  sample_names <- sample_names[big_enough]
+  cat(length(fnFs), "samples remain after size filter.\n")
+}
 
-# Choose a few representative FASTQ files (forward and reverse)
+# [3] quality profiles and truncation lengths --------------------------
+# truncation lengths are calculated empirically at median Q25 position
+# floors: forward >= 248bp, reverse >= 240bp
+# if your library has gene-specific primers on the reads, set --trim_left_f
+# and --trim_left_r to the primer lengths — these are trimmed before truncation
+
 repFs <- fnFs[1:min(3, length(fnFs))]
 repRs <- fnRs[1:min(3, length(fnRs))]
 
-# Generate quality profiles
 pdf(file = paste0(output_prefix, "_quality_profiles.pdf"))
 plotQualityProfile(repFs)
 plotQualityProfile(repRs)
 dev.off()
 
-# Function to calculate truncation at median Q30 threshold
-calc_trunc_len <- function(fastq_files, min_len=100, max_len=251, q_threshold=30) {
+calc_trunc_len <- function(fastq_files, min_len=200, max_len=251, q_threshold=25) {
   qual_list <- lapply(fastq_files, function(f) {
     fastq <- ShortRead::readFastq(f)
     as(quality(fastq), "matrix")
@@ -92,15 +118,14 @@ calc_trunc_len <- function(fastq_files, min_len=100, max_len=251, q_threshold=30
   return(trunc)
 }
 
-truncLenF <- calc_trunc_len(repFs, min_len=200, max_len=251)
-truncLenR <- calc_trunc_len(repRs, min_len=200, max_len=251)
+truncLenF <- calc_trunc_len(repFs, min_len=248, max_len=251)
+truncLenR <- calc_trunc_len(repRs, min_len=240, max_len=251)
 
 cat("Run-level truncation lengths:\n")
 cat("Forward:", truncLenF, "\n")
 cat("Reverse:", truncLenR, "\n")
 
 # [4] filter and trim --------------------------------------------------
-# remove low-quality reads, trim to truncation lengths, drop empty samples
 filt_path <- paste0(output_prefix, "_filtered")
 if (!dir.exists(filt_path)) {
   dir.create(filt_path)
@@ -118,6 +143,7 @@ cat("Filtering and trimming reads...\n")
 
 out <- filterAndTrim(
   fnFs, filtFs, fnRs, filtRs,
+  trimLeft  = c(trim_left_f, trim_left_r),
   truncLen  = c(truncLenF, truncLenR),
   maxN      = 0,
   maxEE     = c(2, 2),
@@ -129,12 +155,11 @@ out <- filterAndTrim(
 cat("Read counts after filtering:\n")
 print(out)
 
-# Drop samples with zero reads after filtering — these will crash DADA2
 kept    <- out[, "reads.out"] > 0 & file.exists(filtFs) & file.size(filtFs) > 0
 dropped <- sample_names[!kept]
 if (length(dropped) > 0) {
   cat("WARNING: The following samples had zero reads after filtering and will be excluded:\n")
-  cat(paste(" ", dropped, collapse="\n"), "\n")
+  cat(paste("  ", dropped, collapse="\n"), "\n")
   write(dropped, paste0(output_prefix, "_dropped_samples.txt"))
   cat("Dropped sample names written to:", paste0(output_prefix, "_dropped_samples.txt"), "\n")
 }
@@ -146,10 +171,8 @@ if (length(filtFs) == 0) stop("No reads survived filtering. Check truncation len
 cat(length(filtFs), "samples remain after filtering.\n")
 
 # [5] error model ------------------------------------------------------
-# learn DADA2 error rates from the data; cached to .rds after first run
-# to save time on reruns — delete the .rds file to force relearning
+# cached to .rds after first run — delete to force relearning
 
-# LOESS error function (defined here for use by any model option)
 loessErrfun_mod <- function(trans) {
   qq  <- as.numeric(colnames(trans))
   est <- matrix(0, nrow=16, ncol=length(qq))
@@ -174,7 +197,6 @@ loessErrfun_mod <- function(trans) {
   return(est)
 }
 
-# Model fit metric (used only for 'compare' mode)
 error_fit_metric <- function(errObj) {
   trans      <- errObj$trans
   trans_norm <- sweep(trans, 2, colSums(trans), "/")
@@ -185,7 +207,15 @@ error_fit_metric <- function(errObj) {
 
 err_cache_file <- paste0(output_prefix, "_error_model.rds")
 
-if (file.exists(err_cache_file)) {
+if (!is.null(error_model_rds)) {
+  if (!file.exists(error_model_rds)) stop("Error model RDS not found: ", error_model_rds)
+  cat("Loading error model from --error_model_rds:", error_model_rds, "\n")
+  err_cache <- readRDS(error_model_rds)
+  errF <- err_cache$errF
+  errR <- err_cache$errR
+  cat("Error model loaded.\n\n")
+
+} else if (file.exists(err_cache_file)) {
   cat("Loading saved error model from:", err_cache_file, "\n")
   err_cache <- readRDS(err_cache_file)
   errF <- err_cache$errF
@@ -195,7 +225,6 @@ if (file.exists(err_cache_file)) {
 } else {
 
   if (error_model == "loess") {
-    # --- LOESS only (default, recommended for Hsp60 amplicon data) ---
     cat("Learning error rates using LOESS model...\n")
     errF <- learnErrors(filtFs, multithread=TRUE, nbases=1e9,
                         errorEstimationFunction=loessErrfun_mod)
@@ -204,14 +233,12 @@ if (file.exists(err_cache_file)) {
     cat("LOESS error model complete.\n\n")
 
   } else if (error_model == "default") {
-    # --- DADA2 default model only ---
     cat("Learning error rates using DADA2 default model...\n")
     errF <- learnErrors(filtFs, multithread=TRUE, nbases=1e9)
     errR <- learnErrors(filtRs, multithread=TRUE, nbases=1e9)
     cat("Default error model complete.\n\n")
 
   } else if (error_model == "compare") {
-    # --- Run both models and select best fit ---
     cat("Learning error rates using both default and LOESS models (this will take longer)...\n")
 
     cat("  Running default model...\n")
@@ -245,52 +272,93 @@ if (file.exists(err_cache_file)) {
     cat("Error model selection complete.\n\n")
   }
 
-  # save error model for reuse on reruns
   cat("Saving error model to:", err_cache_file, "\n")
   saveRDS(list(errF=errF, errR=errR), err_cache_file)
 }
 
 # [6] dereplicate and denoise ------------------------------------------
-# collapse identical reads, then run DADA2 to infer true sequences
-cat("\n--- Step 6: Dereplicating reads ---\n")
+cat("Dereplicating reads...\n")
 derepFs <- derepFastq(filtFs)
 derepRs <- derepFastq(filtRs)
 names(derepFs) <- sample_names
 names(derepRs) <- sample_names
 cat("Dereplication complete.\n")
 
-cat("\n--- Step 6b: DADA2 denoising (this is the slow step) ---\n")
-cat("Denoising forward reads...\n")
-dadaFs <- dada(derepFs, err=errF, multithread=TRUE, pool="pseudo")
-cat("Denoising reverse reads...\n")
-dadaRs <- dada(derepRs, err=errR, multithread=TRUE, pool="pseudo")
-cat("Denoising complete.\n")
+# denoising cached to .rds — reused automatically on reruns
+dada_cache_file <- paste0(output_prefix, "_dada_objects.rds")
 
-cat("\n--- Step 6c: Merging paired reads ---\n")
-mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
-cat("Merging complete.\n")
+if (file.exists(dada_cache_file)) {
+  cat("Loading saved DADA2 objects from:", dada_cache_file, "\n")
+  dada_cache <- readRDS(dada_cache_file)
+  dadaFs <- dada_cache$dadaFs
+  dadaRs <- dada_cache$dadaRs
+  cat("DADA2 objects loaded.\n")
+} else {
+  cat("DADA2 denoising (this is the slow step)...\n")
+  cat("Denoising forward reads...\n")
+  dadaFs <- dada(derepFs, err=errF, multithread=TRUE, pool=pool_method)
+  cat("Denoising reverse reads...\n")
+  dadaRs <- dada(derepRs, err=errR, multithread=TRUE, pool=pool_method)
+  cat("Saving DADA2 objects to:", dada_cache_file, "\n")
+  saveRDS(list(dadaFs=dadaFs, dadaRs=dadaRs), dada_cache_file)
+  cat("Denoising complete.\n")
+}
 
-cat("\n--- Step 6d: Making sequence table ---\n")
+cat("Merging paired reads...\n")
+mergers <- vector("list", length(sample_names))
+names(mergers) <- sample_names
+merge_failed <- c()
+
+for (s in sample_names) {
+  mergers[[s]] <- tryCatch({
+    mergePairs(dadaFs[[s]], derepFs[[s]], dadaRs[[s]], derepRs[[s]],
+               minOverlap=20, maxMismatch=0, verbose=FALSE)
+  }, error = function(e) {
+    cat("WARNING: Merging failed for sample", s, "—", conditionMessage(e), "\n")
+    merge_failed <<- c(merge_failed, s)
+    NULL
+  })
+}
+
+if (length(merge_failed) > 0) {
+  cat("WARNING:", length(merge_failed), "sample(s) failed merging and will be excluded:\n")
+  cat(paste("  ", merge_failed, collapse="\n"), "\n")
+  write(merge_failed, paste0(output_prefix, "_merge_failed_samples.txt"))
+  mergers      <- mergers[!names(mergers) %in% merge_failed]
+  dadaFs       <- dadaFs[!names(dadaFs) %in% merge_failed]
+  sample_names <- sample_names[!sample_names %in% merge_failed]
+}
+
+if (length(mergers) == 0) stop("No samples survived merging.")
+cat("Merging complete.", length(mergers), "samples retained.\n")
+
+cat("Making sequence table...\n")
 seqtab  <- makeSequenceTable(mergers)
 cat("Sequence table dimensions:", dim(seqtab), "\n")
 
 # [7] length filter ----------------------------------------------------
-# keep only sequences within the expected Hsp60 amplicon range (390-475 bp)
-cat("\n--- Step 7: Filtering by amplicon length (390-475 bp) ---\n")
-target_range <- 390:475
+# expected Hsp60 amplicon range: 343-475 bp
+# (390-475 bp for standard primers; 343-475 bp accommodates trimLeft primer removal)
+cat("Filtering by amplicon length (343-475 bp)...\n")
+target_range <- 343:475
 seqtab <- seqtab[, nchar(colnames(seqtab)) %in% target_range]
-cat("Sequences in target length range (390-475 bp):", ncol(seqtab), "\n")
+cat("Sequences in target length range (343-475 bp):", ncol(seqtab), "\n")
 
 # [8] chimera removal --------------------------------------------------
-# remove chimeric sequences using consensus method
-cat("\n--- Step 8: Removing chimeras ---\n")
-seqtab_nochim <- removeBimeraDenovo(seqtab, method="consensus",
-                                    multithread=TRUE, verbose=TRUE)
-cat("Sequences after chimera removal:", ncol(seqtab_nochim), "\n")
+# chimera removal is skipped by default when samples from different primer sets
+# are processed together, as cross-primer comparisons produce false chimera calls.
+# filter non-target sequences downstream using taxonomy.
+# to enable chimera removal, uncomment the lines below and comment out the passthrough.
+#
+# seqtab_nochim <- removeBimeraDenovo(seqtab, method="consensus",
+#                                     multithread=TRUE, verbose=TRUE)
+# cat("Sequences after chimera removal:", ncol(seqtab_nochim), "\n")
+seqtab_nochim <- seqtab
+cat("Chimera removal skipped — filter by taxonomy downstream.\n")
+cat("Sequences retained:", ncol(seqtab_nochim), "\n")
 
 # [8b] read tracking ---------------------------------------------------
-# summarize reads retained at each step per sample; saved as TSV
-cat("\n--- Step 8b: Generating read tracking table ---\n")
+cat("Generating read tracking table...\n")
 get_n <- function(x) sum(getUniques(x))
 track <- data.frame(
   sample    = sample_names,
@@ -308,19 +376,16 @@ print(track)
 cat("Read tracking written to:", track_file, "\n")
 
 # [9] ASV tables -------------------------------------------------------
-# write counts tables with sequence-based and numbered ASV row names
-cat("\n--- Step 9: Writing ASV tables ---\n")
+cat("Writing ASV tables...\n")
 asv_seqs <- colnames(seqtab_nochim)
 rownames(seqtab_nochim) <- sample_names
 
-# Sequence-based ASVs
 asv_tab_seq <- t(seqtab_nochim)
 rownames(asv_tab_seq) <- asv_seqs
 write.table(asv_tab_seq,
             paste0(output_prefix, "_Counts_seqASV_b.tsv"),
             sep="\t", quote=FALSE, col.names=NA)
 
-# Numbered ASVs
 asv_ids     <- paste0("ASV_", seq_along(asv_seqs))
 asv_tab_num <- asv_tab_seq
 rownames(asv_tab_num) <- asv_ids
@@ -329,17 +394,14 @@ write.table(asv_tab_num,
             sep="\t", quote=FALSE, col.names=NA)
 
 # [10] FASTA output ----------------------------------------------------
-# write numbered ASV sequences to FASTA for use in classification step
-cat("\n--- Step 10: Writing FASTA ---\n")
+cat("Writing FASTA...\n")
 asv_fasta_path <- paste0(output_prefix, "_ASVs.fa")
 asv_fasta      <- c(rbind(paste0(">", asv_ids), asv_seqs))
 write(asv_fasta, asv_fasta_path)
 cat("FASTA written to:", asv_fasta_path, "\n")
 
 # [11] phyloseq object -------------------------------------------------
-# create phyloseq object with ASV counts and sample metadata
-# taxonomy is added in the classification step (vc_hsp60_classify.R)
-cat("\n--- Step 11: Creating phyloseq object ---\n")
+cat("Creating phyloseq object...\n")
 sample_metadata <- data.frame(
   SampleID   = colnames(asv_tab_num),
   TotalReads = colSums(asv_tab_num),
@@ -357,8 +419,7 @@ saveRDS(ps, ps_file)
 cat("Phyloseq object written to:", ps_file, "\n")
 
 # [12] summary ---------------------------------------------------------
-# print output file paths and next-step instructions
-cat("\n=== Pipeline finished ===\n")
+cat("\nPipeline finished.\n")
 cat("\nOutputs:\n")
 cat("1. Sequence-based ASV table:", paste0(output_prefix, "_Counts_seqASV_b.tsv"), "\n")
 cat("2. Numbered ASV table:      ", paste0(output_prefix, "_Counts_numASV.tsv"), "\n")
@@ -370,4 +431,4 @@ if (length(dropped) > 0) {
   cat("7. Dropped samples log:     ", paste0(output_prefix, "_dropped_samples.txt"), "\n")
 }
 cat("\nNext step: run taxonomy classification using run_vchsp60_classify.slurm\n")
-cat("or: Rscript vc_hsp60_classify.R --output_prefix", output_prefix, "--classifier /path/to/cpn60_classifier_v11.qza\n")
+cat("or: Rscript scripts/vc_hsp60_classify.R --output_prefix", output_prefix, "--classifier /path/to/cpn60_classifier_v11.qza\n")

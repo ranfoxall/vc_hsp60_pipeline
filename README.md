@@ -8,33 +8,70 @@ This pipeline processes paired-end Illumina reads generated with the *Vibrio*-ce
 
 ---
 
-## What you'll need
+## Quick start
 
-- A Linux, macOS, or Windows system, or an HPC cluster (tested on UNH Premise with Linux)
-- Conda or Miniconda
-- Paired-end demultiplexed FASTQ files in standard Illumina format
-- The cpn60 QIIME2 classifier (see Step 4)
-
-> **Note:** QIIME2 has limited Windows support. If you are on Windows and want to run the classification step, consider using [WSL (Windows Subsystem for Linux)](https://learn.microsoft.com/en-us/windows/wsl/install) or a Linux HPC cluster.
+| I am a... | Start here |
+|-----------|-----------|
+| **UNH Premise user** | Skip to [UNH Premise quick start](#unh-premise-quick-start) |
+| **New user on another system** | Follow the full setup steps below |
+| **Returning user re-running an analysis** | See [Restarting a failed job](#restarting-a-failed-job) |
 
 ---
 
-## Step 1: Clone the repository
+## What you'll need
+
+- A Linux, macOS, or Windows system, or an HPC cluster (tested on UNH Premise)
+- Conda or Miniconda
+- Paired-end demultiplexed FASTQ files in standard Illumina naming format
+- The cpn60 QIIME2 classifier (see [Step 5](#step-5-get-the-cpn60-classifier))
+
+> **Windows users:** QIIME2 has limited Windows support. For the classification step, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) or a Linux HPC cluster.
+
+---
+
+## UNH Premise quick start
+
+If you are working on UNH Premise, environments and the classifier are already set up. You just need to:
+
+**1. Clone the repo:**
+```bash
+cd /mnt/home/whistler/yourname
+git clone https://github.com/ranfoxall/vc_hsp60_pipeline.git
+```
+
+**2. Create the pipeline environment (once only):**
+```bash
+module purge
+module load anaconda/colsa
+conda env create -f vc_hsp60_pipeline/environment.yml
+conda activate vc_hsp60_pipeline
+Rscript vc_hsp60_pipeline/install_packages.R
+```
+
+**3. Edit and submit the SLURM script:**
+```bash
+cd /mnt/home/whistler/yourname/vc_hsp60_pipeline
+cp run_vchsp60_full.slurm my_run.slurm
+# Edit my_run.slurm — set READS_PATH, OUTPUT_PREFIX, WORKDIR, SCRIPT_PATH
+sbatch my_run.slurm
+```
+
+The SLURM scripts set `UNH_PREMISE=1` by default, which automatically configures the QIIME2 environment and classifier path. See [Step 7](#step-7-run-the-pipeline) for details on what variables to set.
+
+---
+
+## Full setup (all systems)
+
+### Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/vc_hsp60_pipeline.git
+git clone https://github.com/ranfoxall/vc_hsp60_pipeline.git
 cd vc_hsp60_pipeline
 ```
 
-> **UNH Premise:** Run this from your home or project directory, e.g.:
-> ```bash
-> cd /mnt/home/whistler/yourname
-> git clone https://github.com/yourusername/vc_hsp60_pipeline.git
-> ```
-
 ---
 
-## Step 2: Install Miniconda (if not already installed)
+### Step 2: Install Miniconda (if not already installed)
 
 Download and install Miniconda: [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html)
 
@@ -42,7 +79,9 @@ Download and install Miniconda: [https://docs.conda.io/en/latest/miniconda.html]
 
 ---
 
-## Step 3: Create the conda environment
+### Step 3: Create the pipeline conda environment
+
+This environment contains R, DADA2, and all required packages for the core pipeline.
 
 ```bash
 conda env create -f environment.yml
@@ -57,11 +96,11 @@ conda activate vc_hsp60_pipeline
 > conda activate vc_hsp60_pipeline
 > ```
 
-> **Note:** QIIME2 is **not** included in this environment — it runs in its own separate environment. See Step 5.
+> **Note:** QIIME2 is **not** included in this environment — it runs in its own separate environment (see Step 4).
 
 ---
 
-## Step 3b: Install R/Bioconductor packages
+### Step 3b: Install R/Bioconductor packages
 
 Most Bioconductor packages cannot be reliably installed via conda. Run the provided installer **once** after activating the environment:
 
@@ -104,25 +143,24 @@ This installs all packages in the correct order, skips anything already installe
 
 ---
 
-## Step 4: Get QIIME2
+### Step 4: Get QIIME2
 
-QIIME2 is only needed for taxonomy classification (Step 7). It must be installed in its own conda environment — **do not** install it into `vc_hsp60_pipeline`.
+QIIME2 is only needed for taxonomy classification. It must be installed in its own conda environment — **do not** install it into `vc_hsp60_pipeline`.
 
-> **UNH Premise:** QIIME2 is already available — no installation needed. The SLURM scripts will activate it automatically.
+> **UNH Premise:** QIIME2 (`qiime2-2020.2`) is already available — no installation needed. The SLURM scripts activate it automatically.
 
-For all other systems, install following the official instructions: [https://docs.qiime2.org](https://docs.qiime2.org). Note the name of your QIIME2 conda environment — you will need it in Step 6.
+**All other systems:** Install following the official instructions at [https://docs.qiime2.org](https://docs.qiime2.org). Note the name of your QIIME2 conda environment — you will need it in Step 7.
 
 ---
 
-## Step 5: Get the cpn60 classifier
+### Step 5: Get the cpn60 classifier
 
-The classifier is needed only for taxonomy classification (Step 7).
+The cpn60 classifier is used for taxonomy assignment in the classification step.
 
-> **UNH Premise:** The classifier is already available at:
+> **UNH Premise:** The classifier is already available — no download needed. The SLURM scripts point to it automatically. The path is:
 > ```
-> /mnt/home/whistler/shared/cpn60-Classifier/cpn60-q2-feature-classifier-v11/cpn60_classifier_v11.qza
+> /mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 > ```
-> The SLURM scripts point to this path automatically — no download needed.
 
 **All other users:** Download from GitHub:
 ```bash
@@ -131,11 +169,11 @@ tar -xzf cpn60-q2-feature-classifier-v11.tar.gz
 # Classifier will be at: cpn60-q2-feature-classifier-v11/cpn60_classifier_v11.qza
 ```
 
-> **Important:** The pre-trained classifier was built with QIIME2 v2022.11 (scikit-learn v0.24.1). If your QIIME2 version is different, you may need to retrain it. See the [Troubleshooting](#troubleshooting) section.
+> **Important:** The classifier must match the scikit-learn version in your QIIME2 environment. If you get a version mismatch error during classification, see [Troubleshooting](#troubleshooting) for how to retrain the classifier.
 
 ---
 
-## Step 6: Prepare your reads
+### Step 6: Prepare your reads
 
 Organize your demultiplexed FASTQ files in a single folder. Files must follow standard Illumina naming:
 
@@ -147,36 +185,39 @@ raw_reads/
   Sample2_S2_L001_R2_001.fastq.gz
 ```
 
-Sample names are extracted by stripping `_S##_L###_R1_001.fastq.gz`, so `1B_1_new_S1_L001_R1_001.fastq.gz` becomes `1B_1_new`.
+Sample names are extracted automatically by stripping `_S##_L###_R1_001.fastq.gz`. For example, `1B_1_new_S1_L001_R1_001.fastq.gz` becomes sample `1B_1_new`.
 
-> Every `_R1_` file must have a matching `_R2_` file.
+> Every `_R1_` file must have a matching `_R2_` file or it will be skipped.
 
 ---
 
-## Step 7: Run the pipeline
+### Step 7: Run the pipeline
 
-There are two ways to run the pipeline — via SLURM (recommended for HPC) or directly on the command line.
+There are two ways to run the pipeline — via SLURM (recommended for HPC clusters) or directly on the command line.
 
-### Option A: SLURM (recommended for UNH Premise and other HPC clusters)
+#### Option A: SLURM (recommended for UNH Premise and other HPC clusters)
 
-Open the SLURM script for your use case and edit the variables at the top:
+Choose the SLURM script that fits your situation:
 
 | Script | Use when |
 |--------|----------|
-| `run_vchsp60_full.slurm` | Run everything in one job (trimming + DADA2 + classification) |
-| `run_vchsp60_dada2.slurm` | Run trimming + DADA2 only, then classify separately |
-| `run_vchsp60_classify.slurm` | Run classification only (after DADA2 is done) |
+| `run_vchsp60_full.slurm` | Run everything in one job: trimming + DADA2 + classification |
+| `run_vchsp60_dada2.slurm` | Run trimming + DADA2 only (classify separately when done) |
+| `run_vchsp60_classify.slurm` | Run classification only (after DADA2 is already done) |
 
-**Variables to set at the top of each script:**
+**Edit the variables at the top of the script before submitting.** The key variables are:
 
 ```bash
-UNH_PREMISE=1        # set to 1 for UNH Premise (auto-sets environments + classifier path)
-                     # set to 0 for other systems and fill in QIIME2_ENV, PIPELINE_ENV, CLASSIFIER
+UNH_PREMISE=1     # set to 1 for UNH Premise (auto-configures environments + classifier)
+                  # set to 0 for other systems, then fill in QIIME2_ENV, PIPELINE_ENV, CLASSIFIER below
 
-READS_PATH=/path/to/your/raw_reads    # folder containing your .fastq.gz files
-OUTPUT_PREFIX=Hsp60_MyRun             # short name for this run — used to name all outputs
-WORKDIR=/path/to/your/workdir         # where outputs will be written
+READS_PATH=/path/to/your/raw_reads   # folder containing your .fastq.gz files
+OUTPUT_PREFIX=Hsp60_MyRun            # short name for this run — all output files start with this
+WORKDIR=/path/to/your/workdir        # where outputs will be written
 SCRIPT_PATH=/path/to/vc_hsp60_pipeline  # where you cloned this repo
+
+POOL=pseudo       # DADA2 pooling: pseudo (recommended), FALSE (fastest), TRUE (most sensitive)
+CONFIDENCE=0.7    # taxonomy confidence threshold (0–1); lower = more assignments, less certainty
 ```
 
 > **UNH Premise example:**
@@ -188,25 +229,28 @@ SCRIPT_PATH=/path/to/vc_hsp60_pipeline  # where you cloned this repo
 > SCRIPT_PATH=/mnt/home/whistler/yourname/vc_hsp60_pipeline
 > ```
 
-Then submit:
+**Submit the job:**
 ```bash
 sbatch run_vchsp60_full.slurm
-# or for separate jobs:
-JOB1=$(sbatch --parsable run_vchsp60_dada2.slurm)
-JOB2=$(sbatch --parsable --dependency=afterok:$JOB1 run_vchsp60_classify.slurm)
 ```
 
-Monitor your jobs:
+Or run DADA2 and classification as separate dependent jobs:
 ```bash
-squeue -u $USER                          # check job status
-tail -f vchsp60_full_<job_id>.log        # stream log output
-sacct -u $USER                           # view completed/failed jobs
-scancel <job_id>                         # cancel a job
+JOB1=$(sbatch --parsable run_vchsp60_dada2.slurm)
+sbatch --dependency=afterok:$JOB1 run_vchsp60_classify.slurm
+```
+
+**Monitor your jobs:**
+```bash
+squeue -u $USER                           # see running jobs
+tail -f vchsp60_full_<job_id>.log         # stream log output live
+sacct -j <job_id> --format=JobID,State,Elapsed,MaxRSS   # check memory and status
+scancel <job_id>                          # cancel a job
 ```
 
 ---
 
-### Option B: Command line (non-HPC)
+#### Option B: Command line (non-HPC)
 
 **Step 7a — DADA2 pipeline:**
 ```bash
@@ -214,7 +258,8 @@ conda activate vc_hsp60_pipeline
 
 Rscript scripts/vc_hsp60_pipeline.R \
   --reads_path /path/to/raw_reads \
-  --output_prefix Hsp60_MyRun
+  --output_prefix Hsp60_MyRun \
+  --pool pseudo
 ```
 
 **Step 7b — Taxonomy classification:**
@@ -223,13 +268,17 @@ conda activate <your_qiime2_env>
 
 Rscript scripts/vc_hsp60_classify.R \
   --output_prefix Hsp60_MyRun \
-  --classifier /path/to/cpn60_classifier_v11.qza
+  --classifier /path/to/cpn60_classifier_v11.qza \
+  --confidence 0.7
 ```
 
-> **UNH Premise users** — use this classifier path:
-> ```
-> --classifier /mnt/home/whistler/shared/cpn60-Classifier/cpn60-q2-feature-classifier-v11/cpn60_classifier_v11.qza
-> ```
+**Step 7c — Add taxonomy to phyloseq object:**
+```bash
+conda activate vc_hsp60_pipeline
+
+Rscript scripts/vc_hsp60_add_taxonomy.R \
+  --output_prefix Hsp60_MyRun
+```
 
 ---
 
@@ -239,42 +288,77 @@ Rscript scripts/vc_hsp60_classify.R \
 
 | File | Description |
 |------|-------------|
-| `{prefix}_Counts_seqASV_b.tsv` | Counts table with full ASV sequences as row names |
-| `{prefix}_Counts_numASV.tsv` | Counts table with numbered ASVs (ASV_1, ASV_2, …) |
-| `{prefix}_ASVs.fa` | FASTA of ASVs — input for classification |
+| `{prefix}_Counts_seqASV_b.tsv` | ASV counts table with full sequences as row names |
+| `{prefix}_Counts_numASV.tsv` | ASV counts table with numbered ASVs (ASV_1, ASV_2, …) |
+| `{prefix}_ASVs.fa` | FASTA of ASV sequences — input for classification |
 | `{prefix}_phyloseq.rds` | Phyloseq object with counts and sample metadata |
-| `{prefix}_quality_profiles.pdf` | Quality profiles for representative samples |
-| `{prefix}_read_tracking.tsv` | Per-sample read counts at each step: input, filtered, denoised, merged, non-chimeric, % retained |
-| `{prefix}_error_model.rds` | Cached error model — reused automatically on reruns |
-| `{prefix}_dropped_samples.txt` | List of samples with zero reads after filtering *(if any)* |
+| `{prefix}_quality_profiles.pdf` | Read quality profiles for representative samples |
+| `{prefix}_read_tracking.tsv` | Per-sample read counts at each step (see below) |
+| `{prefix}_error_model.rds` | Cached error model — reloaded automatically on reruns |
+| `{prefix}_dada_objects.rds` | Cached denoising results — reloaded automatically if merging fails |
+| `{prefix}_dropped_samples.txt` | Samples with zero reads after filtering *(if any)* |
+| `{prefix}_merge_failed_samples.txt` | Samples that failed merging *(if any)* |
 
 ### From `vc_hsp60_classify.R`
 
 | File | Description |
 |------|-------------|
-| `{prefix}_taxonomy.tsv` | Taxonomy assignments from cpn60 classifier |
-| `{prefix}_ASVs_counts_taxonomy.tsv` | Counts + taxonomy merged table |
-| `{prefix}_phyloseq_taxonomy.rds` | Phyloseq object with taxonomy added |
+| `{prefix}_taxonomy.tsv` | Raw taxonomy assignments with confidence scores |
+| `{prefix}_taxonomy_table.csv` | Taxonomy split into rank columns (Kingdom–Species) for phyloseq |
+| `{prefix}_taxonomy_confidence.csv` | Per-ASV confidence scores |
+| `{prefix}_ASVs_counts_taxonomy.tsv` | Counts table merged with raw taxonomy string |
+
+### From `vc_hsp60_add_taxonomy.R`
+
+| File | Description |
+|------|-------------|
+| `{prefix}_phyloseq_taxonomy.rds` | Final phyloseq object with counts, sample data, taxonomy, and ASV sequences |
+
+---
+
+## Understanding the read tracking table
+
+After a successful DADA2 run, `{prefix}_read_tracking.tsv` shows how many reads passed each step per sample:
+
+| sample | reads_in | filtered | denoised | merged | nonchim | pct_retained |
+|--------|----------|----------|----------|--------|---------|--------------|
+| Sample1 | 150000 | 120000 | 118500 | 112000 | 108000 | 72.0 |
+
+**What each column means:**
+- `reads_in` — raw reads entering the pipeline
+- `filtered` — reads passing quality filtering and truncation
+- `denoised` — unique sequences after DADA2 denoising
+- `merged` — read pairs successfully merged
+- `nonchim` — reads remaining after chimera removal
+- `pct_retained` — percentage of input reads in the final output
+
+**If `pct_retained` is very low, check:**
+- **Low `filtered`:** reads may be poor quality or truncation lengths too short — check `{prefix}_quality_profiles.pdf`
+- **Low `merged`:** truncation lengths may be too short for reads to overlap — the Hsp60 amplicon is ~430bp, requiring F+R ≥ 450bp total
+- **Low `nonchim`:** high chimera rate can indicate primer sequences remaining on reads
 
 ---
 
 ## Restarting a failed job
 
-The SLURM scripts have restart flags so you can skip steps that already completed. Set any flag to `1` to skip that step:
+The pipeline saves intermediate results automatically so you don't have to start over if a job fails.
 
+**Restart flags** — set to `1` to skip steps already completed:
 ```bash
-SKIP_IMPORT=0      # set to 1 to skip QIIME2 import
-SKIP_CUTADAPT=0    # set to 1 to skip adapter trimming
-SKIP_DADA2=0       # set to 1 to skip DADA2
-SKIP_CLASSIFY=0    # set to 1 to skip classification (full script only)
+SKIP_IMPORT=0      # skip QIIME2 import
+SKIP_CUTADAPT=0    # skip adapter trimming
+SKIP_DADA2=0       # skip DADA2
+SKIP_CLASSIFY=0    # skip classification (full script only)
 ```
 
-When skipping cutadapt, you must also set `TRIMMED_QZA` to your trimmed reads artifact from the previous run:
+When skipping cutadapt, set `TRIMMED_QZA` to point to your trimmed reads from the previous run:
 ```bash
 TRIMMED_QZA=Hsp60_MyRun_trimmed-reads.qza
 ```
 
-**Common scenario — trimming worked but DADA2 failed:**
+**Common restart scenarios:**
+
+*Trimming worked but DADA2 failed:*
 ```bash
 SKIP_IMPORT=1
 SKIP_CUTADAPT=1
@@ -282,7 +366,22 @@ TRIMMED_QZA=Hsp60_MyRun_trimmed-reads.qza
 SKIP_DADA2=0
 ```
 
-**Common scenario — DADA2 worked but classification failed (`run_vchsp60_full.slurm` only):**
+*Denoising completed but merging failed:*
+
+No extra flags needed. The pipeline saves denoising results to `{prefix}_dada_objects.rds` automatically. On resubmit it will skip denoising and go straight to merging.
+```bash
+SKIP_IMPORT=1
+SKIP_CUTADAPT=1
+TRIMMED_QZA=Hsp60_MyRun_trimmed-reads.qza
+SKIP_DADA2=0
+```
+
+> To force denoising to rerun (e.g. after changing truncation lengths or pooling method):
+> ```bash
+> rm Hsp60_MyRun_dada_objects.rds
+> ```
+
+*DADA2 worked but classification failed:*
 ```bash
 SKIP_IMPORT=1
 SKIP_CUTADAPT=1
@@ -293,43 +392,50 @@ SKIP_CLASSIFY=0
 
 ### Reusing a saved error model
 
-Error model learning is the most time-consuming part of DADA2. The pipeline handles this in two ways:
-
-**Automatic caching:** After the first successful run, `{prefix}_error_model.rds` is saved in your working directory. On any rerun with the same `OUTPUT_PREFIX`, it is loaded automatically — no action needed.
-
-**Manual override:** If you want to reuse an error model from a *different* run (e.g. your job failed before the cache was saved, or you want to reuse a model from a previous dataset), set `ERROR_MODEL_RDS` at the top of the SLURM script:
+The error model is cached to `{prefix}_error_model.rds` after the first run and reloaded automatically on reruns with the same prefix. To reuse an error model from a different run, set:
 ```bash
 ERROR_MODEL_RDS=Hsp60_MyRun_error_model.rds
 ```
 
-Or on the command line:
-```bash
-Rscript scripts/vc_hsp60_pipeline.R   --reads_path /path/to/reads   --output_prefix Hsp60_MyRun   --error_model_rds Hsp60_MyRun_error_model.rds
-```
-
-To force the pipeline to relearn error rates from scratch (e.g. if you change your input reads or truncation lengths), leave `ERROR_MODEL_RDS` blank and delete the auto-cached file:
+To force the pipeline to relearn the error model from scratch:
 ```bash
 rm Hsp60_MyRun_error_model.rds
+# leave ERROR_MODEL_RDS blank
 ```
 
-### Checking read loss with the tracking table
+---
 
-After a successful run, `{prefix}_read_tracking.tsv` shows how many reads passed each step per sample:
+## Runtime and performance
 
-| sample | reads_in | filtered | denoised | merged | nonchim | pct_retained |
-|--------|----------|----------|----------|--------|---------|--------------|
-| Sample1 | 150000 | 120000 | 118500 | 112000 | 108000 | 72.0 |
+DADA2 is the most computationally intensive step. Runtimes below are approximate for UNH Premise:
 
-If a sample has very low `pct_retained`, check:
-- **Low filtered:** reads may be poor quality or wrong length — check `{prefix}_quality_profiles.pdf`
-- **Low merged:** truncation lengths may be too short for forward and reverse reads to overlap
-- **Low nonchim:** high chimera rate can indicate primer issues or library prep problems
+| Dataset size | Pooling | Approximate runtime |
+|---|---|---|
+| ~30 samples, mixed read depths | `pseudo` | 1–2 days |
+| ~60 samples, high read depths | `pseudo` | 2–3 days |
+| ~30 samples, mixed read depths | `FALSE` | 2–6 hours |
+
+### Pooling methods
+
+| Method | Speed | Sensitivity | Recommended for |
+|--------|-------|-------------|----------------|
+| `pseudo` | Medium | Medium-high | Most datasets — default |
+| `FALSE` | Fastest | Lower | High read depth, high-abundance taxa |
+| `TRUE` | Slowest | Highest | Small datasets with rare taxa |
+
+### Classification confidence threshold
+
+The `--confidence` argument (default: `0.7`) controls how certain the classifier must be before assigning a taxonomy. The value used is printed at the start of the classification log.
+
+- **Higher values** (e.g. `0.9`) — fewer assignments, more conservative
+- **Lower values** (e.g. `0.5`) — more assignments, less certainty
+- Unassigned ranks are filled with the rank prefix (e.g. `g__`, `s__`) following standard phyloseq convention
 
 ---
 
 ## Merging multiple runs or plates
 
-If you have data from multiple sequencing runs, merge them using the merge script:
+If you have data from multiple sequencing runs or plates, merge them using the merge script:
 
 ```bash
 Rscript scripts/merge_vc_hsp60_ASVs.R merged_run \
@@ -337,7 +443,7 @@ Rscript scripts/merge_vc_hsp60_ASVs.R merged_run \
   results/plate2_Counts_seqASV_b.tsv results/plate2_ASVs.fa
 ```
 
-> Only sequence-based ASV tables (`_b`) are mergeable — do not merge numbered ASV tables directly.
+> Only sequence-based ASV tables (`_Counts_seqASV_b.tsv`) are mergeable — do not merge numbered ASV tables directly.
 
 ---
 
@@ -345,10 +451,14 @@ Rscript scripts/merge_vc_hsp60_ASVs.R merged_run \
 
 ```R
 library(phyloseq)
-ps <- readRDS("Hsp60_MyRun_phyloseq.rds")
+
+# Load the final phyloseq object (includes taxonomy and ASV sequences)
+ps <- readRDS("Hsp60_MyRun_phyloseq_taxonomy.rds")
+
 otu_table(ps)    # ASV counts
 sample_data(ps)  # sample metadata
-tax_table(ps)    # taxonomy (available after running vc_hsp60_classify.R)
+tax_table(ps)    # taxonomy (Kingdom through Species)
+refseq(ps)       # ASV sequences
 ```
 
 ---
@@ -356,43 +466,46 @@ tax_table(ps)    # taxonomy (available after running vc_hsp60_classify.R)
 ## Troubleshooting
 
 **Classification fails with a scikit-learn version error:**
-The pre-trained classifier was built with scikit-learn 0.24.1 (QIIME2 v2022.11). If your QIIME2 version is different, retrain the classifier:
+
+The classifier must match the scikit-learn version in your QIIME2 environment. Retrain using the pre-imported reference files:
 
 ```bash
 conda activate <your_qiime2_env>
 
-qiime tools import \
-  --type 'FeatureData[Sequence]' \
-  --input-path /path/to/cpn60_v11_seqs.fasta \
-  --output-path cpn60_v11_seqs.qza
-
-qiime tools import \
-  --type 'FeatureData[Taxonomy]' \
-  --input-format HeaderlessTSVTaxonomyFormat \
-  --input-path /path/to/cpn60_v11_taxonomy_table.txt \
-  --output-path cpn60_v11_taxonomy.qza
-
 qiime feature-classifier fit-classifier-naive-bayes \
-  --i-reference-reads cpn60_v11_seqs.qza \
-  --i-reference-taxonomy cpn60_v11_taxonomy.qza \
+  --i-reference-reads /path/to/cpn60_v11_seqs.qza \
+  --i-reference-taxonomy /path/to/cpn60_v11_taxonomy.qza \
   --o-classifier cpn60_classifier_v11_retrained.qza
 ```
 
-> **UNH Premise:** The reference files are in the shared directory:
+> **UNH Premise:** Reference files are in the shared directory:
 > ```
-> /mnt/home/whistler/shared/cpn60-Classifier/cpn60-q2-feature-classifier-v11/
->   cpn60_v11_seqs.fasta
->   cpn60_v11_taxonomy_table.txt
+> /mnt/home/whistler/shared/cpn60-Classifier/
+>   cpn60_v11_seqs.qza        # reference sequences (pre-imported)
+>   cpn60_v11_taxonomy.qza    # taxonomy (pre-imported)
 > ```
-> This only needs to be done once. Contact [Toni Westbrook](mailto:anthony.westbrook@unh.edu) if you have trouble with module conflicts.
+
+**Very low read retention in the `nonchim` column:**
+
+If reads pass filtering and merging but are almost entirely removed as chimeras, check whether gene-specific primer sequences are still present on the reads. Primer sequences remaining on reads will cause them to appear chimeric. Use `cutadapt` with `--front-f` / `--front-r` to trim 5' primers before running DADA2.
 
 **Samples dropped with zero reads after filtering:**
-The pipeline will automatically exclude these samples and write their names to `{prefix}_dropped_samples.txt`. This is usually caused by very low input read counts or poor quality reads. Check the `_quality_profiles.pdf` to assess read quality before running.
+
+The pipeline automatically excludes these samples and writes their names to `{prefix}_dropped_samples.txt`. This is usually caused by very low input read counts, poor read quality, or truncation lengths that are too long. Check `{prefix}_quality_profiles.pdf`.
+
+**Denoising completed but merging fails with "Non-corresponding objects" error:**
+
+This means the cached `{prefix}_dada_objects.rds` was saved with different filtered reads than what exists now (e.g. you changed truncation lengths). Delete the cache and rerun:
+```bash
+rm Hsp60_MyRun_dada_objects.rds
+```
 
 **QIIME2 not found in PATH:**
-Make sure your QIIME2 conda environment is active before running `vc_hsp60_classify.R`:
 ```bash
+# Activate your QIIME2 environment before running classify:
 conda activate <your_qiime2_env>
+# UNH Premise:
+module purge && module load anaconda/colsa && source activate qiime2-2020.2
 ```
 
 ---
@@ -405,15 +518,24 @@ conda activate <your_qiime2_env>
 |----------|----------|---------|-------------|
 | `--reads_path` | Yes | — | Path to folder containing raw paired FASTQ files |
 | `--output_prefix` | Yes | — | Prefix for all output files |
-| `--error_model` | No | `loess` | Error model: `loess` (recommended), `default`, or `compare` (runs both, picks best — slowest) |
+| `--error_model` | No | `loess` | Error model: `loess` (recommended), `default`, or `compare` |
+| `--error_model_rds` | No | — | Path to a saved error model `.rds` to skip error learning |
+| `--pool` | No | `pseudo` | DADA2 pooling: `pseudo`, `FALSE`, or `TRUE` |
 
 ### vc_hsp60_classify.R
 
 | Argument | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `--output_prefix` | Yes | — | Output prefix used in vc_hsp60_pipeline.R |
+| `--output_prefix` | Yes | — | Must match prefix used in `vc_hsp60_pipeline.R` |
 | `--classifier` | Yes | — | Path to cpn60 QIIME2 classifier `.qza` |
-| `--phyloseq_rds` | No | `{prefix}_phyloseq.rds` | Override phyloseq file path if not in working directory |
+| `--confidence` | No | `0.7` | Taxonomy confidence threshold (0–1) |
+| `--phyloseq_rds` | No | `{prefix}_phyloseq.rds` | Override phyloseq file path |
+
+### vc_hsp60_add_taxonomy.R
+
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `--output_prefix` | Yes | — | Must match prefix used in previous steps |
 
 ---
 
@@ -422,14 +544,15 @@ conda activate <your_qiime2_env>
 ```
 vc_hsp60_pipeline/
   scripts/
-    vc_hsp60_pipeline.R       # DADA2 pipeline
-    vc_hsp60_classify.R       # QIIME2 classification
-    merge_vc_hsp60_ASVs.R     # Multi-run merge utility
-  run_vchsp60_full.slurm      # SLURM: full pipeline
-  run_vchsp60_dada2.slurm     # SLURM: trimming + DADA2 only
-  run_vchsp60_classify.slurm  # SLURM: classification only
-  environment.yml             # conda environment
-  install_packages.R          # Bioconductor installer (run once)
+    vc_hsp60_pipeline.R        # DADA2 pipeline
+    vc_hsp60_classify.R        # QIIME2 taxonomy classification
+    vc_hsp60_add_taxonomy.R    # Merges taxonomy + sequences into phyloseq RDS
+    merge_vc_hsp60_ASVs.R      # Multi-run merge utility
+    install_packages.R         # Bioconductor installer (run once)
+  run_vchsp60_full.slurm       # SLURM: full pipeline
+  run_vchsp60_dada2.slurm      # SLURM: trimming + DADA2 only
+  run_vchsp60_classify.slurm   # SLURM: classification only
+  environment.yml              # conda environment
   README.md
   CITATION.cff
   LICENSE
@@ -439,9 +562,9 @@ vc_hsp60_pipeline/
 
 ## Citation
 
-If you use this pipeline in your research, please cite it as:
+If you use this pipeline in your research, please cite:
 
-> Foxall, R., Whistler, C. and Jones, S. (2026). *vc_hsp60_pipeline: A Vibrio-centric Hsp60 amplicon sequencing pipeline*. Whistler Lab, University of New Hampshire. https://github.com/yourusername/vc_hsp60_pipeline
+> Foxall, R., Whistler, C. and Jones, S. (2026). *vc_hsp60_pipeline: A Vibrio-centric Hsp60 amplicon sequencing pipeline*. Whistler Lab, University of New Hampshire. https://github.com/ranfoxall/vc_hsp60_pipeline
 
 A `CITATION.cff` file is included — GitHub will display a **"Cite this repository"** button automatically.
 
@@ -467,7 +590,7 @@ Please also cite the original assay:
 
 This pipeline was developed by Randi Foxall in the Whistler Lab at the University of New Hampshire under the supervision of Dr. Cheryl Whistler, with support from Dr. Stephen Jones.
 
-This work was supported by the New Hampshire Agricultural Experiment Station through the NHAES CREATE (Collaborative Research Enhancement and Team Exploration) program, and by NH EPSCoR.
+Funding provided by the New Hampshire Agricultural Experiment Station through the NHAES CREATE program, and by NH EPSCoR.
 
 ---
 
@@ -476,8 +599,8 @@ This work was supported by the New Hampshire Agricultural Experiment Station thr
 | Name | Role | Affiliation |
 |------|------|-------------|
 | Randi Foxall | Developer | Whistler Lab, University of New Hampshire |
-| Cheryl Whistler | Principal Investigator & Funder | Department of Molecular, Cellular and Biomedical Sciences, University of New Hampshire |
-| Stephen Jones | Co-Investigator & Funder | Department of Natural Resources and the Environment, UNH |
+| Cheryl Whistler | Principal Investigator & Funder | Dept. of Molecular, Cellular and Biomedical Sciences, UNH |
+| Stephen Jones | Co-Investigator & Funder | Dept. of Natural Resources and the Environment, UNH |
 
 ---
 
