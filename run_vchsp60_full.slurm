@@ -27,6 +27,7 @@ else
   CLASSIFIER=/path/to/cpn60_classifier_v11.qza   # path to downloaded classifier .qza
 fi
 
+
 # ---------------- EDIT THESE ----------------
 
 # Path to your raw FASTQ folder
@@ -47,12 +48,25 @@ ERROR_MODEL=loess
 # DADA2 pooling: pseudo (recommended), FALSE (fastest), TRUE (most sensitive)
 POOL=pseudo
 
-# Taxonomy confidence threshold (0-1, default 0.7)
+# Classification method: vibrio (default) or sklearn
+# vibrio = BLAST screen + Vibrio sklearn + universal sklearn (King et al. 2019)
+# sklearn = universal cpn60 sklearn classifier only
+METHOD=vibrio
+
+# For vibrio method — BLAST reference and Vibrio-only classifier
+# UNH Premise: BLAST_DB=/mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/repset_final_130219.fas
+# UNH Premise: VIBRIO_CLASSIFIER=/mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/vc_hsp60_classifier_sklearn022.qza
+BLAST_DB=/path/to/repset_final_130219.fas
+VIBRIO_CLASSIFIER=/path/to/vc_hsp60_classifier.qza
+
+# Universal cpn60 classifier — used for non-Vibrio ASVs (vibrio method)
+# or as the sole classifier (sklearn method)
+CLASSIFIER=/mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 CONFIDENCE=0.7
 
 # Bases to trim from 5' end of reads to remove gene-specific primers
 # Set to 0 if primers are not present on your reads (e.g. _orig samples)
-# For Vib-hspF1/R400 primers: TRIM_LEFT_F=23, TRIM_LEFT_R=24
+# For Vib-hspF1/R400 primers: TRIM_LEFT_F=0, TRIM_LEFT_R=0
 TRIM_LEFT_F=0
 TRIM_LEFT_R=0
 
@@ -65,7 +79,7 @@ SKIP_CUTADAPT=0
 SKIP_DADA2=0
 SKIP_CLASSIFY=0
 
-# Required when SKIP_CUTADAPT=1
+# Required when SKIP_CUTADAPT=0
 TRIMMED_QZA=
 
 # Note: if denoising completed but merging failed, the pipeline will
@@ -125,7 +139,7 @@ if [ $SKIP_CUTADAPT -eq 0 ]; then
 
 else
   if [ -z "$TRIMMED_QZA" ]; then
-    echo "ERROR: SKIP_CUTADAPT=1 but TRIMMED_QZA is not set."
+    echo "ERROR: SKIP_CUTADAPT=0 but TRIMMED_QZA is not set."
     exit 1
   fi
 
@@ -170,11 +184,15 @@ fi
 if [ $SKIP_CLASSIFY -eq 0 ]; then
   module purge
   module load anaconda/colsa
-  source activate $QIIME2_ENV
+  source activate $PIPELINE_ENV
 
   srun Rscript $SCRIPT_PATH/scripts/vc_hsp60_classify.R \
     --output_prefix $OUTPUT_PREFIX \
+    --method $METHOD \
+    --blast_db $BLAST_DB \
+    --vibrio_classifier $VIBRIO_CLASSIFIER \
     --classifier $CLASSIFIER \
+    --qiime2_env $QIIME2_ENV \
     --confidence $CONFIDENCE
 
   if [ $? -ne 0 ]; then echo "ERROR: Classification failed."; exit 1; fi
@@ -187,8 +205,4 @@ if [ $SKIP_CLASSIFY -eq 0 ]; then
     --output_prefix $OUTPUT_PREFIX
 
   if [ $? -ne 0 ]; then echo "ERROR: Adding taxonomy to phyloseq failed."; exit 1; fi
-else
-  echo "Skipping classification."
 fi
-
-echo "Done."

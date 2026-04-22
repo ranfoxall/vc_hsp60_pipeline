@@ -2,7 +2,7 @@
 
 A Vibrio-centric hsp60 amplicon sequencing pipeline built on DADA2 and QIIME2.
 
-This pipeline processes paired-end Illumina reads generated with the *Vibrio*-centric assay described in King et al. 2019 (*Front. Microbiol.* 10:2907). It produces ASV tables, FASTA files, and a phyloseq object ready for downstream analysis. Taxonomy classification uses the cpn60 QIIME2 classifier and is run as a separate step, allowing DADA2 and QIIME2 to run in their own conda environments.
+This pipeline processes paired-end Illumina reads generated with the *Vibrio*-centric assay described in King et al. 2019 (*Front. Microbiol.* 10:2907). It produces ASV tables, FASTA files, and a phyloseq object ready for downstream analysis. Taxonomy classification uses a two-step approach: ASVs are first screened against a curated Vibrio hsp60 reference set using BLAST, then classified with a Vibrio-specific sklearn classifier. Non-Vibrio ASVs are classified with the universal cpn60 classifier. This approach matches the method described in King et al. 2019.
 
 > **Note:** This pipeline is designed specifically for the *Vibrio*-centric hsp60 assay. It is **not suitable** for universal hsp60 (cpn60) primers.
 
@@ -153,23 +153,66 @@ QIIME2 is only needed for taxonomy classification. It must be installed in its o
 
 ---
 
-### Step 5: Get the cpn60 classifier
+### Step 5: Get the classification reference files
 
-The cpn60 classifier is used for taxonomy assignment in the classification step.
+Classification requires three files: a BLAST reference FASTA, a Vibrio-only sklearn classifier, and the universal cpn60 classifier for non-Vibrio ASVs.
 
-> **UNH Premise:** The classifier is already available — no download needed. The SLURM scripts point to it automatically. The path is:
+> **UNH Premise:** All files are already available — no download needed. The SLURM scripts point to them automatically:
 > ```
+> # BLAST reference (King et al. 2019 Vibrio hsp60 repset)
+> /mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/repset_final_130219.fas
+>
+> # Vibrio-only classifier (trained from repset)
+> /mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/vc_hsp60_classifier_sklearn022.qza
+>
+> # Universal cpn60 classifier (for non-Vibrio ASVs)
 > /mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 > ```
 
-**All other users:** Download from GitHub:
+**All other users:**
+
+Download the Vibrio hsp60 reference set from the supplemental data of King et al. 2019 — you need `repset_final_130219.fas` and `Vibrio_taxonomy.txt`. Then train the Vibrio-only classifier:
+
+```bash
+conda activate <your_qiime2_env>
+
+# deduplicate taxonomy file (required)
+python3 -c "
+import sys
+seen = set()
+for line in open('Vibrio_taxonomy.txt'):
+    acc = line.split('\t')[0]
+    if acc not in seen:
+        seen.add(acc)
+        sys.stdout.write(line)
+" > Vibrio_taxonomy_dedup.txt
+
+# import reference files
+qiime tools import \
+  --type 'FeatureData[Sequence]' \
+  --input-path repset_final_130219.fas \
+  --output-path repset_final_130219.qza
+
+qiime tools import \
+  --type 'FeatureData[Taxonomy]' \
+  --input-format HeaderlessTSVTaxonomyFormat \
+  --input-path Vibrio_taxonomy_dedup.txt \
+  --output-path Vibrio_taxonomy.qza
+
+# train classifier
+qiime feature-classifier fit-classifier-naive-bayes \
+  --i-reference-reads repset_final_130219.qza \
+  --i-reference-taxonomy Vibrio_taxonomy.qza \
+  --o-classifier vc_hsp60_classifier.qza
+```
+
+Download the universal cpn60 classifier from GitHub:
 ```bash
 wget https://github.com/HillLabSask/cpn60-Classifier/releases/download/v11.1/cpn60-q2-feature-classifier-v11.tar.gz
 tar -xzf cpn60-q2-feature-classifier-v11.tar.gz
-# Classifier will be at: cpn60-q2-feature-classifier-v11/cpn60_classifier_v11.qza
 ```
 
-> **Important:** The classifier must match the scikit-learn version in your QIIME2 environment. If you get a version mismatch error during classification, see [Troubleshooting](#troubleshooting) for how to retrain the classifier.
+> **Important:** Both classifiers must match the scikit-learn version in your QIIME2 environment. See [Troubleshooting](#troubleshooting) if you get a version mismatch error.
 
 ---
 
@@ -217,6 +260,7 @@ WORKDIR=/path/to/your/workdir        # where outputs will be written
 SCRIPT_PATH=/path/to/vc_hsp60_pipeline  # where you cloned this repo
 
 POOL=pseudo       # DADA2 pooling: pseudo (recommended), FALSE (fastest), TRUE (most sensitive)
+METHOD=vibrio     # classification: vibrio (recommended) or sklearn
 CONFIDENCE=0.7    # taxonomy confidence threshold (0–1); lower = more assignments, less certainty
 ```
 
@@ -264,10 +308,21 @@ Rscript scripts/vc_hsp60_pipeline.R \
 
 **Step 7b — Taxonomy classification:**
 ```bash
-conda activate <your_qiime2_env>
+conda activate vc_hsp60_pipeline
 
+# vibrio method (default — recommended)
 Rscript scripts/vc_hsp60_classify.R \
   --output_prefix Hsp60_MyRun \
+  --method vibrio \
+  --blast_db /path/to/repset_final_130219.fas \
+  --vibrio_classifier /path/to/vc_hsp60_classifier.qza \
+  --classifier /path/to/cpn60_classifier_v11.qza \
+  --confidence 0.7
+
+# sklearn method (universal classifier only)
+Rscript scripts/vc_hsp60_classify.R \
+  --output_prefix Hsp60_MyRun \
+  --method sklearn \
   --classifier /path/to/cpn60_classifier_v11.qza \
   --confidence 0.7
 ```
@@ -303,10 +358,10 @@ Rscript scripts/vc_hsp60_add_taxonomy.R \
 
 | File | Description |
 |------|-------------|
-| `{prefix}_taxonomy.tsv` | Raw taxonomy assignments with confidence scores |
 | `{prefix}_taxonomy_table.csv` | Taxonomy split into rank columns (Kingdom–Species) for phyloseq |
-| `{prefix}_taxonomy_confidence.csv` | Per-ASV confidence scores |
-| `{prefix}_ASVs_counts_taxonomy.tsv` | Counts table merged with raw taxonomy string |
+| `{prefix}_taxonomy_confidence.csv` | Per-ASV confidence scores from sklearn classifier |
+| `{prefix}_ASVs_counts_taxonomy.tsv` | Counts table merged with taxonomy |
+| `{prefix}_blast_screen.csv` | BLAST filter results — which ASVs passed as Vibrio *(vibrio method only)* |
 
 ### From `vc_hsp60_add_taxonomy.R`
 
@@ -527,7 +582,10 @@ module purge && module load anaconda/colsa && source activate qiime2-2020.2
 | Argument | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `--output_prefix` | Yes | — | Must match prefix used in `vc_hsp60_pipeline.R` |
-| `--classifier` | Yes | — | Path to cpn60 QIIME2 classifier `.qza` |
+| `--method` | No | `vibrio` | Classification method: `vibrio` (recommended) or `sklearn` |
+| `--blast_db` | vibrio | — | Path to Vibrio hsp60 reference FASTA (`repset_final_130219.fas`) |
+| `--vibrio_classifier` | vibrio | — | Path to Vibrio-only sklearn classifier `.qza` |
+| `--classifier` | No | — | Path to universal cpn60 classifier `.qza` (used for non-Vibrio ASVs) |
 | `--confidence` | No | `0.7` | Taxonomy confidence threshold (0–1) |
 | `--phyloseq_rds` | No | `{prefix}_phyloseq.rds` | Override phyloseq file path |
 
@@ -581,6 +639,8 @@ Please also cite the original assay:
 > Martin M (2011). Cutadapt removes adapter sequences from high-throughput sequencing reads. *EMBnet.journal* 17(1):10–12. https://doi.org/10.14806/ej.17.1.200
 
 > McMurdie PJ and Holmes S (2013). phyloseq: An R package for reproducible interactive analysis and graphics of microbiome census data. *PLoS ONE* 8(4):e61217. https://doi.org/10.1371/journal.pone.0061217
+
+> Camacho C, Coulouris G, Avagyan V et al. (2009). BLAST+: architecture and applications. *BMC Bioinformatics* 10:421. https://doi.org/10.1186/1471-2105-10-421
 
 > R Core Team (2023). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria. https://www.R-project.org/
 

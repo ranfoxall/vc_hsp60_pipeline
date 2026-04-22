@@ -13,15 +13,16 @@
 # License:    CC BY-NC 4.0
 
 library(phyloseq)
-
 args <- commandArgs(trailingOnly=TRUE)
 
 parse_args_simple <- function(args) {
-  result <- list(output_prefix=NULL)
+  result <- list(output_prefix=NULL, phyloseq_rds=NULL)
   i <- 1
   while (i <= length(args)) {
     if (args[i] == "--output_prefix" && i < length(args)) {
       result$output_prefix <- args[i+1]; i <- i + 2
+    } else if (args[i] == "--phyloseq_rds" && i < length(args)) {
+      result$phyloseq_rds <- args[i+1]; i <- i + 2
     } else {
       i <- i + 1
     }
@@ -33,7 +34,7 @@ opt <- parse_args_simple(args)
 if (is.null(opt$output_prefix)) stop("Please provide --output_prefix")
 
 prefix   <- opt$output_prefix
-ps_file  <- paste0(prefix, "_phyloseq.rds")
+ps_file  <- if (!is.null(opt$phyloseq_rds)) opt$phyloseq_rds else paste0(prefix, "_phyloseq.rds")
 tax_file <- paste0(prefix, "_taxonomy_table.csv")
 fa_file  <- paste0(prefix, "_ASVs.fa")
 out_file <- paste0(prefix, "_phyloseq_taxonomy.rds")
