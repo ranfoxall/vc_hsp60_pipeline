@@ -63,7 +63,6 @@ srun Rscript $SCRIPT_PATH/scripts/vc_hsp60_classify.R \
   --method $METHOD \
   --blast_db $BLAST_DB \
   --vibrio_classifier $VIBRIO_CLASSIFIER \
-  --classifier $CLASSIFIER \
   --qiime2_env $QIIME2_ENV \
   --confidence $CONFIDENCE
 

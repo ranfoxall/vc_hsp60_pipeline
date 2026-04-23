@@ -3,9 +3,9 @@
 #
 # Two classification methods:
 #   vibrio  (default) — two-step approach matching King et al. 2019:
-#                       1. BLAST screen against Vibrio hsp60 reference set
+#                       1. BLAST screen against Vibrio hsp60 reference set (>=90% identity, >=90% coverage)
 #                       2. Vibrio ASVs classified with Vibrio-only sklearn classifier
-#                       3. Non-Vibrio ASVs classified with universal cpn60 classifier
+#                       3. Non-Vibrio ASVs left unassigned (recommended — avoids misclassification)
 #   sklearn — universal cpn60 sklearn classifier only
 #
 # Run AFTER vc_hsp60_pipeline.R.
@@ -17,7 +17,6 @@
 #     --method vibrio \
 #     --blast_db /path/to/repset_final_130219.fas \
 #     --vibrio_classifier /path/to/vc_hsp60_classifier_sklearn022.qza \
-#     --classifier /path/to/cpn60_classifier_v11.qza \
 #     --qiime2_env qiime2-2020.2 \
 #     --confidence 0.7
 #
@@ -41,7 +40,6 @@ parse_args_simple <- function(args) {
     method            = "vibrio",
     blast_db          = NULL,
     vibrio_classifier = NULL,
-    classifier        = NULL,
     confidence        = "0.7",
     qiime2_env        = "qiime2-2020.2",
     phyloseq_rds      = NULL
@@ -82,8 +80,6 @@ phyloseq_rds      <- if (!is.null(opt$phyloseq_rds)) opt$phyloseq_rds else paste
 confidence        <- opt$confidence
 qiime2_env        <- opt$qiime2_env
 
-cat("qiime2_env:    ", qiime2_env, "\n")
-
 asv_fasta_path <- paste0(output_prefix, "_ASVs.fa")
 counts_table   <- paste0(output_prefix, "_Counts_numASV.tsv")
 
@@ -94,6 +90,7 @@ for (f in c(asv_fasta_path, counts_table)) {
 cat("output_prefix: ", output_prefix, "\n")
 cat("method:        ", method, "\n")
 cat("confidence:    ", confidence, "\n")
+cat("qiime2_env:    ", qiime2_env, "\n")
 
 # taxonomy rank prefixes — standard phyloseq convention
 tax_ranks   <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
@@ -168,13 +165,12 @@ run_sklearn <- function(fasta_path, classifier, confidence, prefix_tag) {
 }
 
 # =============================================================================
-# VIBRIO METHOD (default) — BLAST filter + Vibrio sklearn + universal sklearn
+# VIBRIO METHOD (default) — BLAST filter + Vibrio-only sklearn; non-Vibrio left unassigned
 # =============================================================================
 if (method == "vibrio") {
 
   blast_db             <- opt$blast_db
   vibrio_classifier    <- opt$vibrio_classifier
-  universal_classifier <- opt$classifier
 
   if (is.null(blast_db))          stop("Please provide --blast_db for vibrio method")
   if (is.null(vibrio_classifier)) stop("Please provide --vibrio_classifier for vibrio method")
@@ -183,8 +179,7 @@ if (method == "vibrio") {
 
   cat("blast_db:           ", blast_db, "\n")
   cat("vibrio_classifier:  ", vibrio_classifier, "\n")
-  if (!is.null(universal_classifier))
-    cat("universal_classifier:", universal_classifier, "\n")
+
 
   # check BLAST
   blast_check <- system2("which", args="blastn", stdout=TRUE, stderr=TRUE)
@@ -279,30 +274,19 @@ if (method == "vibrio") {
     cat("Vibrio classification complete.\n")
   }
 
-  # classify non-Vibrio ASVs with universal classifier
+  # non-Vibrio ASVs are left unassigned
+  # the Vibrio-centric primer pair may non-specifically amplify other taxa;
+  # ASVs that do not hit the Vibrio repset are likely non-specific amplification
+  # and are better left unassigned than classified by a universal classifier
   if (length(non_vibrio_asvs) > 0) {
-    if (!is.null(universal_classifier) && file.exists(universal_classifier)) {
-      non_vibrio_fasta_path <- paste0(output_prefix, "_ASVs_non_vibrio.fa")
-      non_vibrio_fasta <- unlist(lapply(fasta_seqs, function(x) {
-        id <- sub("^>", "", x[1])
-        if (id %in% non_vibrio_asvs) x else NULL
-      }))
-      writeLines(non_vibrio_fasta, non_vibrio_fasta_path)
-      cat("Classifying", length(non_vibrio_asvs), "non-Vibrio ASVs with universal classifier...\n")
-      non_vibrio_tax <- run_sklearn(non_vibrio_fasta_path, universal_classifier,
-                                     confidence, paste0(output_prefix, "_non_vibrio"))
-      all_tax_raw    <- rbind(all_tax_raw, non_vibrio_tax)
-      cat("Universal classification complete.\n")
-    } else {
-      cat("No universal classifier provided — non-Vibrio ASVs will be unassigned.\n")
-      unassigned <- data.frame(
-        Taxon      = rep("k__;p__;c__;o__;f__;g__;s__", length(non_vibrio_asvs)),
-        Confidence = rep(0, length(non_vibrio_asvs)),
-        row.names  = non_vibrio_asvs,
-        stringsAsFactors = FALSE
-      )
-      all_tax_raw <- rbind(all_tax_raw, unassigned)
-    }
+    cat("Leaving", length(non_vibrio_asvs), "non-Vibrio ASVs unassigned.\n")
+    unassigned <- data.frame(
+      Taxon      = rep("k__;p__;c__;o__;f__;g__;s__", length(non_vibrio_asvs)),
+      Confidence = rep(0, length(non_vibrio_asvs)),
+      row.names  = non_vibrio_asvs,
+      stringsAsFactors = FALSE
+    )
+    all_tax_raw <- rbind(all_tax_raw, unassigned)
   }
 
   # reorder to match original ASV order

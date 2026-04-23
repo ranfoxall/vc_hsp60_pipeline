@@ -49,7 +49,7 @@ ERROR_MODEL=loess
 POOL=pseudo
 
 # Classification method: vibrio (default) or sklearn
-# vibrio = BLAST screen + Vibrio sklearn + universal sklearn (King et al. 2019)
+# vibrio = BLAST screen + Vibrio-only sklearn; non-Vibrio ASVs left unassigned
 # sklearn = universal cpn60 sklearn classifier only
 METHOD=vibrio
 
@@ -59,8 +59,8 @@ METHOD=vibrio
 BLAST_DB=/path/to/repset_final_130219.fas
 VIBRIO_CLASSIFIER=/path/to/vc_hsp60_classifier.qza
 
-# Universal cpn60 classifier — used for non-Vibrio ASVs (vibrio method)
-# or as the sole classifier (sklearn method)
+# Universal cpn60 classifier — used only for sklearn method
+# (vibrio method leaves non-Vibrio ASVs unassigned)
 CLASSIFIER=/mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 CONFIDENCE=0.7
 
@@ -191,7 +191,6 @@ if [ $SKIP_CLASSIFY -eq 0 ]; then
     --method $METHOD \
     --blast_db $BLAST_DB \
     --vibrio_classifier $VIBRIO_CLASSIFIER \
-    --classifier $CLASSIFIER \
     --qiime2_env $QIIME2_ENV \
     --confidence $CONFIDENCE
 

@@ -2,7 +2,7 @@
 
 A Vibrio-centric hsp60 amplicon sequencing pipeline built on DADA2 and QIIME2.
 
-This pipeline processes paired-end Illumina reads generated with the *Vibrio*-centric assay described in King et al. 2019 (*Front. Microbiol.* 10:2907). It produces ASV tables, FASTA files, and a phyloseq object ready for downstream analysis. Taxonomy classification uses a two-step approach: ASVs are first screened against a curated Vibrio hsp60 reference set using BLAST, then classified with a Vibrio-specific sklearn classifier. Non-Vibrio ASVs are classified with the universal cpn60 classifier. This approach matches the method described in King et al. 2019.
+This pipeline processes paired-end Illumina reads generated with the *Vibrio*-centric assay described in King et al. 2019 (*Front. Microbiol.* 10:2907). It produces ASV tables, FASTA files, and a phyloseq object ready for downstream analysis. Taxonomy classification uses a two-step approach matching King et al. 2019: ASVs are first screened against a curated Vibrio hsp60 reference set using BLAST (≥90% identity, ≥90% coverage), then Vibrio ASVs are classified with a Vibrio-specific sklearn classifier. Non-Vibrio ASVs are left unassigned — since the primer pair is Vibrio-centric, non-hits are likely non-specific amplification.
 
 > **Note:** This pipeline is designed specifically for the *Vibrio*-centric hsp60 assay. It is **not suitable** for universal hsp60 (cpn60) primers.
 
@@ -316,7 +316,7 @@ Rscript scripts/vc_hsp60_classify.R \
   --method vibrio \
   --blast_db /path/to/repset_final_130219.fas \
   --vibrio_classifier /path/to/vc_hsp60_classifier.qza \
-  --classifier /path/to/cpn60_classifier_v11.qza \
+  --qiime2_env qiime2-2020.2 \
   --confidence 0.7
 
 # sklearn method (universal classifier only)
@@ -361,7 +361,7 @@ Rscript scripts/vc_hsp60_add_taxonomy.R \
 | `{prefix}_taxonomy_table.csv` | Taxonomy split into rank columns (Kingdom–Species) for phyloseq |
 | `{prefix}_taxonomy_confidence.csv` | Per-ASV confidence scores from sklearn classifier |
 | `{prefix}_ASVs_counts_taxonomy.tsv` | Counts table merged with taxonomy |
-| `{prefix}_blast_screen.csv` | BLAST filter results — which ASVs passed as Vibrio *(vibrio method only)* |
+| `{prefix}_blast_screen.csv` | Per-ASV BLAST screen results — Vibrio/non-Vibrio assignment, % identity, coverage *(vibrio method only)* |
 
 ### From `vc_hsp60_add_taxonomy.R`
 
@@ -585,7 +585,8 @@ module purge && module load anaconda/colsa && source activate qiime2-2020.2
 | `--method` | No | `vibrio` | Classification method: `vibrio` (recommended) or `sklearn` |
 | `--blast_db` | vibrio | — | Path to Vibrio hsp60 reference FASTA (`repset_final_130219.fas`) |
 | `--vibrio_classifier` | vibrio | — | Path to Vibrio-only sklearn classifier `.qza` |
-| `--classifier` | No | — | Path to universal cpn60 classifier `.qza` (used for non-Vibrio ASVs) |
+| `--classifier` | sklearn | — | Path to universal cpn60 classifier `.qza` (sklearn method only) |
+| `--qiime2_env` | No | `qiime2-2020.2` | Name of QIIME2 conda environment |
 | `--confidence` | No | `0.7` | Taxonomy confidence threshold (0–1) |
 | `--phyloseq_rds` | No | `{prefix}_phyloseq.rds` | Override phyloseq file path |
 
