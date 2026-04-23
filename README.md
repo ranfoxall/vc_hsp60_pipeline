@@ -155,7 +155,7 @@ QIIME2 is only needed for taxonomy classification. It must be installed in its o
 
 ### Step 5: Get the classification reference files
 
-Classification requires three files: a BLAST reference FASTA, a Vibrio-only sklearn classifier, and the universal cpn60 classifier for non-Vibrio ASVs.
+Classification requires two files: the Vibrio hsp60 BLAST reference FASTA and the Vibrio-only sklearn classifier. The universal cpn60 classifier is only needed if using `--method sklearn`.
 
 > **UNH Premise:** All files are already available — no download needed. The SLURM scripts point to them automatically:
 > ```
@@ -164,10 +164,9 @@ Classification requires three files: a BLAST reference FASTA, a Vibrio-only skle
 >
 > # Vibrio-only classifier (trained from repset)
 > /mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/vc_hsp60_classifier_sklearn022.qza
->
-> # Universal cpn60 classifier (for non-Vibrio ASVs)
-> /mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 > ```
+>
+> The universal cpn60 classifier is also available at `/mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza` if you need the `sklearn` method.
 
 **All other users:**
 
@@ -206,13 +205,12 @@ qiime feature-classifier fit-classifier-naive-bayes \
   --o-classifier vc_hsp60_classifier.qza
 ```
 
-Download the universal cpn60 classifier from GitHub:
-```bash
-wget https://github.com/HillLabSask/cpn60-Classifier/releases/download/v11.1/cpn60-q2-feature-classifier-v11.tar.gz
-tar -xzf cpn60-q2-feature-classifier-v11.tar.gz
-```
-
-> **Important:** Both classifiers must match the scikit-learn version in your QIIME2 environment. See [Troubleshooting](#troubleshooting) if you get a version mismatch error.
+> **Optional — sklearn method only:** If you want to use `--method sklearn`, download the universal cpn60 classifier from GitHub:
+> ```bash
+> wget https://github.com/HillLabSask/cpn60-Classifier/releases/download/v11.1/cpn60-q2-feature-classifier-v11.tar.gz
+> tar -xzf cpn60-q2-feature-classifier-v11.tar.gz
+> ```
+> The classifier must match the scikit-learn version in your QIIME2 environment. See [Troubleshooting](#troubleshooting) if you get a version mismatch error.
 
 ---
 
