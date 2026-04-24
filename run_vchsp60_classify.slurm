@@ -19,11 +19,15 @@ UNH_PREMISE=1
 if [ $UNH_PREMISE -eq 1 ]; then
   QIIME2_ENV=qiime2-2020.2
   PIPELINE_ENV=vc_hsp60_pipeline
+  BLAST_DB=/mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/repset_final_130219.fas
+  VIBRIO_CLASSIFIER=/mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/vc_hsp60_classifier_sklearn022.qza
   CLASSIFIER=/mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 else
   QIIME2_ENV=qiime2-2024.10.1                    # name of your QIIME2 conda environment
   PIPELINE_ENV=vc_hsp60_pipeline                 # name of your pipeline conda environment
-  CLASSIFIER=/path/to/cpn60_classifier_v11.qza   # path to downloaded classifier .qza
+  BLAST_DB=/path/to/repset_final_130219.fas       # path to Vibrio hsp60 reference FASTA
+  VIBRIO_CLASSIFIER=/path/to/vc_hsp60_classifier.qza  # path to Vibrio-only classifier
+  CLASSIFIER=/path/to/cpn60_classifier_v11.qza   # path to universal cpn60 classifier
 fi
 
 # ---------------- EDIT THESE ----------------
@@ -41,8 +45,8 @@ SCRIPT_PATH=/path/to/vc_hsp60_pipeline
 METHOD=vibrio
 
 # For vibrio method — BLAST reference and Vibrio-only classifier
-BLAST_DB=/path/to/repset_final_130219.fas
-VIBRIO_CLASSIFIER=/path/to/vc_hsp60_classifier_sklearn022.qza
+# (UNH Premise paths are set automatically above when UNH_PREMISE=1)
+# If UNH_PREMISE=0, update BLAST_DB and VIBRIO_CLASSIFIER in the else block above
 
 # Taxonomy confidence threshold (0-1, default 0.7)
 CONFIDENCE=0.7
@@ -63,6 +67,7 @@ srun Rscript $SCRIPT_PATH/scripts/vc_hsp60_classify.R \
   --method $METHOD \
   --blast_db $BLAST_DB \
   --vibrio_classifier $VIBRIO_CLASSIFIER \
+  --classifier $CLASSIFIER \
   --qiime2_env $QIIME2_ENV \
   --confidence $CONFIDENCE
 
@@ -77,7 +82,8 @@ module load anaconda/colsa
 source activate $PIPELINE_ENV
 
 srun Rscript $SCRIPT_PATH/scripts/vc_hsp60_add_taxonomy.R \
-  --output_prefix $OUTPUT_PREFIX
+  --output_prefix $OUTPUT_PREFIX \
+  --method $METHOD
 
 if [ $? -ne 0 ]; then
   echo "ERROR: Adding taxonomy to phyloseq failed."

@@ -5,24 +5,29 @@
 #   vibrio  (default) — two-step approach matching King et al. 2019:
 #                       1. BLAST screen against Vibrio hsp60 reference set (>=90% identity, >=90% coverage)
 #                       2. Vibrio ASVs classified with Vibrio-only sklearn classifier
-#                       3. Non-Vibrio ASVs left unassigned (recommended — avoids misclassification)
+#                       3. Non-Vibrio ASVs classified with universal cpn60 classifier (optional)
+#                       Produces two phyloseq objects:
+#                         {prefix}_phyloseq_vibrio.rds  — Vibrio ASVs only
+#                         {prefix}_phyloseq_full.rds    — all ASVs with taxonomy
 #   sklearn — universal cpn60 sklearn classifier only
 #
 # Run AFTER vc_hsp60_pipeline.R.
 # On UNH Premise, use the SLURM script (run_vchsp60_classify.slurm).
 # Manually:
-#   conda activate vc_hsp60_pipeline
+#   conda activate vc_hsp60_pipeline  # (with qiime in PATH via export or conda run)
 #   Rscript vc_hsp60_classify.R \
 #     --output_prefix Hsp60_MyRun \
 #     --method vibrio \
 #     --blast_db /path/to/repset_final_130219.fas \
 #     --vibrio_classifier /path/to/vc_hsp60_classifier_sklearn022.qza \
+#     --classifier /path/to/cpn60_classifier_v11.qza \
 #     --qiime2_env qiime2-2020.2 \
 #     --confidence 0.7
 #
 # UNH Premise reference files:
 #   /mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/repset_final_130219.fas
 #   /mnt/home/whistler/foxall/hsp60_ref/vc_hsp60_ref/vc_hsp60_classifier_sklearn022.qza
+#   /mnt/home/whistler/shared/cpn60-Classifier/cpn60_classifier_v11_sklearn142.qza
 #
 # Developer:  Randi Foxall
 # PI:         Dr. Cheryl Whistler
@@ -30,6 +35,11 @@
 # Lab:        Whistler Lab, Dept. of Molecular, Cellular and Biomedical Sciences, UNH
 # Funding:    NHAES CREATE program, NH EPSCoR
 # License:    CC BY-NC 4.0
+
+suppressPackageStartupMessages({
+  library(phyloseq)
+  library(dplyr)
+})
 
 # [1] arguments -------------------------------------------------------
 args <- commandArgs(trailingOnly=TRUE)
@@ -40,6 +50,7 @@ parse_args_simple <- function(args) {
     method            = "vibrio",
     blast_db          = NULL,
     vibrio_classifier = NULL,
+    classifier        = NULL,
     confidence        = "0.7",
     qiime2_env        = "qiime2-2020.2",
     phyloseq_rds      = NULL
@@ -120,8 +131,6 @@ build_tax_mat <- function(taxon_strings, asv_ids) {
 }
 
 # helper: run QIIME2 sklearn classification on a FASTA file
-# qiime must be available in PATH — activate your QIIME2 conda environment before running,
-# or use the SLURM scripts which handle environment activation automatically.
 run_sklearn <- function(fasta_path, classifier, confidence, prefix_tag) {
   queries_qza         <- paste0(prefix_tag, "_ASVs.qza")
   taxonomy_qza        <- paste0(prefix_tag, "_taxonomy.qza")
@@ -165,21 +174,23 @@ run_sklearn <- function(fasta_path, classifier, confidence, prefix_tag) {
 }
 
 # =============================================================================
-# VIBRIO METHOD (default) — BLAST filter + Vibrio-only sklearn; non-Vibrio left unassigned
+# VIBRIO METHOD (default) — BLAST filter + Vibrio sklearn + universal sklearn
 # =============================================================================
 if (method == "vibrio") {
 
   blast_db             <- opt$blast_db
   vibrio_classifier    <- opt$vibrio_classifier
+  universal_classifier <- opt$classifier
 
   if (is.null(blast_db))          stop("Please provide --blast_db for vibrio method")
   if (is.null(vibrio_classifier)) stop("Please provide --vibrio_classifier for vibrio method")
   if (!file.exists(blast_db))          stop("BLAST database FASTA not found: ", blast_db)
   if (!file.exists(vibrio_classifier)) stop("Vibrio classifier not found: ", vibrio_classifier)
 
-  cat("blast_db:           ", blast_db, "\n")
-  cat("vibrio_classifier:  ", vibrio_classifier, "\n")
-
+  cat("blast_db:            ", blast_db, "\n")
+  cat("vibrio_classifier:   ", vibrio_classifier, "\n")
+  if (!is.null(universal_classifier))
+    cat("universal_classifier:", universal_classifier, "\n")
 
   # check BLAST
   blast_check <- system2("which", args="blastn", stdout=TRUE, stderr=TRUE)
@@ -227,7 +238,6 @@ if (method == "vibrio") {
   if (file.exists(blast_out) && file.size(blast_out) > 0) {
     blast_raw   <- read.table(blast_out, sep="\t", header=FALSE,
                                col.names=blast_cols, stringsAsFactors=FALSE)
-    # keep only hits with qcovs >= 90
     blast_raw   <- blast_raw[blast_raw$qcovs >= 90, ]
     vibrio_asvs <- unique(blast_raw$qseqid)
   } else {
@@ -242,7 +252,7 @@ if (method == "vibrio") {
   # write BLAST screen summary
   blast_screen_file <- paste0(output_prefix, "_blast_screen.csv")
   screen_summary <- data.frame(
-    ASV_ID   = all_asvs,
+    ASV_ID    = all_asvs,
     is_vibrio = all_asvs %in% vibrio_asvs,
     stringsAsFactors = FALSE
   )
@@ -257,7 +267,8 @@ if (method == "vibrio") {
   # split FASTA into Vibrio and non-Vibrio
   fasta_seqs <- split(fasta_lines, cumsum(grepl("^>", fasta_lines)))
 
-  all_tax_raw <- NULL
+  all_tax_raw    <- NULL
+  vibrio_tax_raw <- NULL
 
   # classify Vibrio ASVs with Vibrio-only classifier
   if (length(vibrio_asvs) > 0) {
@@ -268,25 +279,37 @@ if (method == "vibrio") {
     }))
     writeLines(vibrio_fasta, vibrio_fasta_path)
     cat("Classifying", length(vibrio_asvs), "Vibrio ASVs...\n")
-    vibrio_tax  <- run_sklearn(vibrio_fasta_path, vibrio_classifier,
-                                confidence, paste0(output_prefix, "_vibrio"))
-    all_tax_raw <- vibrio_tax
+    vibrio_tax_raw <- run_sklearn(vibrio_fasta_path, vibrio_classifier,
+                                   confidence, paste0(output_prefix, "_vibrio"))
+    all_tax_raw    <- vibrio_tax_raw
     cat("Vibrio classification complete.\n")
   }
 
-  # non-Vibrio ASVs are left unassigned
-  # the Vibrio-centric primer pair may non-specifically amplify other taxa;
-  # ASVs that do not hit the Vibrio repset are likely non-specific amplification
-  # and are better left unassigned than classified by a universal classifier
+  # classify non-Vibrio ASVs with universal classifier
+  universal_tax_raw <- NULL
   if (length(non_vibrio_asvs) > 0) {
-    cat("Leaving", length(non_vibrio_asvs), "non-Vibrio ASVs unassigned.\n")
-    unassigned <- data.frame(
-      Taxon      = rep("k__;p__;c__;o__;f__;g__;s__", length(non_vibrio_asvs)),
-      Confidence = rep(0, length(non_vibrio_asvs)),
-      row.names  = non_vibrio_asvs,
-      stringsAsFactors = FALSE
-    )
-    all_tax_raw <- rbind(all_tax_raw, unassigned)
+    if (!is.null(universal_classifier) && file.exists(universal_classifier)) {
+      non_vibrio_fasta_path <- paste0(output_prefix, "_ASVs_non_vibrio.fa")
+      non_vibrio_fasta <- unlist(lapply(fasta_seqs, function(x) {
+        id <- sub("^>", "", x[1])
+        if (id %in% non_vibrio_asvs) x else NULL
+      }))
+      writeLines(non_vibrio_fasta, non_vibrio_fasta_path)
+      cat("Classifying", length(non_vibrio_asvs), "non-Vibrio ASVs with universal classifier...\n")
+      universal_tax_raw <- run_sklearn(non_vibrio_fasta_path, universal_classifier,
+                                        confidence, paste0(output_prefix, "_non_vibrio"))
+      all_tax_raw       <- rbind(all_tax_raw, universal_tax_raw)
+      cat("Universal classification complete.\n")
+    } else {
+      cat("No universal classifier provided — non-Vibrio ASVs will be unassigned.\n")
+      unassigned <- data.frame(
+        Taxon      = rep("k__;p__;c__;o__;f__;g__;s__", length(non_vibrio_asvs)),
+        Confidence = rep(0, length(non_vibrio_asvs)),
+        row.names  = non_vibrio_asvs,
+        stringsAsFactors = FALSE
+      )
+      all_tax_raw <- rbind(all_tax_raw, unassigned)
+    }
   }
 
   # reorder to match original ASV order
@@ -311,8 +334,10 @@ if (method == "vibrio") {
   if (!file.exists(cpn60_classifier)) stop("Classifier not found: ", cpn60_classifier)
   cat("classifier:    ", cpn60_classifier, "\n")
 
-  tax_raw <- run_sklearn(asv_fasta_path, cpn60_classifier, confidence, output_prefix)
-  tax_mat <- build_tax_mat(tax_raw$Taxon, rownames(tax_raw))
+  tax_raw        <- run_sklearn(asv_fasta_path, cpn60_classifier, confidence, output_prefix)
+  tax_mat        <- build_tax_mat(tax_raw$Taxon, rownames(tax_raw))
+  vibrio_tax_raw <- NULL
+  universal_tax_raw <- tax_raw
 
   confidence_file <- paste0(output_prefix, "_taxonomy_confidence.csv")
   write.csv(data.frame(Confidence=tax_raw$Confidence, row.names=rownames(tax_raw)),
@@ -321,7 +346,7 @@ if (method == "vibrio") {
 }
 
 # =============================================================================
-# SHARED — taxonomy table, counts merge, summary
+# SHARED — taxonomy table, counts merge
 # =============================================================================
 
 taxonomy_table      <- as.data.frame(tax_mat, stringsAsFactors=FALSE)
@@ -337,9 +362,102 @@ counts_tax_file <- paste0(output_prefix, "_ASVs_counts_taxonomy.tsv")
 write.table(counts_tax, counts_tax_file, sep="\t", quote=FALSE, col.names=NA)
 cat("Counts + taxonomy written to:", counts_tax_file, "\n")
 
+# =============================================================================
+# SUMMARY STATS — per-sample Vibrio proportions and species abundance
+# only produced for vibrio method
+# =============================================================================
+
+if (method == "vibrio") {
+  cat("Generating Vibrio summary statistics...\n")
+
+  # identify Vibrio ASVs from Vibrio classifier
+  vibrio_classified_asvs <- if (!is.null(vibrio_tax_raw)) rownames(vibrio_tax_raw) else character(0)
+
+  # identify Vibrio/Aliivibrio calls from universal classifier
+  universal_vibrio_asvs <- character(0)
+  if (!is.null(universal_tax_raw) && nrow(universal_tax_raw) > 0) {
+    univ_tax_mat <- build_tax_mat(universal_tax_raw$Taxon, rownames(universal_tax_raw))
+    universal_vibrio_asvs <- rownames(univ_tax_mat)[
+      grepl("vibrio", univ_tax_mat[, "Genus"], ignore.case=TRUE)
+    ]
+  }
+
+  # per-sample summary
+  sample_names <- colnames(counts_num)
+  summary_rows <- lapply(sample_names, function(s) {
+    sample_counts    <- counts_num[, s]
+    names(sample_counts) <- rownames(counts_num)
+
+    total_reads      <- sum(sample_counts)
+    vibrio_reads     <- sum(sample_counts[names(sample_counts) %in% vibrio_classified_asvs])
+    univ_vibrio_reads <- sum(sample_counts[names(sample_counts) %in% universal_vibrio_asvs])
+    combined_vibrio  <- vibrio_reads + univ_vibrio_reads
+    non_vibrio_reads <- sum(sample_counts[names(sample_counts) %in%
+                              setdiff(rownames(counts_num),
+                                      c(vibrio_classified_asvs, universal_vibrio_asvs))])
+    unassigned_reads <- total_reads - vibrio_reads - univ_vibrio_reads - non_vibrio_reads
+
+    vibrio_asv_count     <- sum(sample_counts[names(sample_counts) %in% vibrio_classified_asvs] > 0)
+    vibrio_species       <- unique(taxonomy_table[vibrio_classified_asvs[
+      sample_counts[names(sample_counts) %in% vibrio_classified_asvs] > 0], "Species"])
+    vibrio_species_count <- length(vibrio_species[!grepl("^s__$", vibrio_species)])
+
+    data.frame(
+      sample                = s,
+      total_reads           = total_reads,
+      vibrio_reads          = vibrio_reads,
+      vibrio_universal_reads = univ_vibrio_reads,
+      combined_vibrio_reads = combined_vibrio,
+      non_vibrio_reads      = non_vibrio_reads,
+      unassigned_reads      = unassigned_reads,
+      prop_vibrio           = round(combined_vibrio / max(total_reads, 1), 4),
+      vibrio_asv_count      = vibrio_asv_count,
+      vibrio_species_count  = vibrio_species_count,
+      stringsAsFactors      = FALSE
+    )
+  })
+  vibrio_summary      <- do.call(rbind, summary_rows)
+  vibrio_summary_file <- paste0(output_prefix, "_vibrio_summary.tsv")
+  write.table(vibrio_summary, vibrio_summary_file, sep="\t", quote=FALSE, row.names=FALSE)
+  cat("Vibrio summary written to:", vibrio_summary_file, "\n")
+
+  # species relative abundance — long format
+  species_rows <- lapply(sample_names, function(s) {
+    sample_counts <- counts_num[, s]
+    names(sample_counts) <- rownames(counts_num)
+    vibrio_counts <- sample_counts[names(sample_counts) %in% vibrio_classified_asvs]
+    total_vibrio  <- sum(vibrio_counts)
+    if (total_vibrio == 0) return(NULL)
+
+    # aggregate by species
+    sp_vec <- taxonomy_table[names(vibrio_counts), "Species"]
+    sp_df  <- data.frame(
+      sample   = s,
+      species  = sp_vec,
+      count    = as.numeric(vibrio_counts),
+      stringsAsFactors = FALSE
+    )
+    sp_agg <- aggregate(count ~ sample + species, data=sp_df, FUN=sum)
+    sp_agg$relative_abundance <- round(sp_agg$count / total_vibrio, 4)
+    sp_agg$total_vibrio_reads <- total_vibrio
+    sp_agg[sp_agg$count > 0, ]
+  })
+  species_abund      <- do.call(rbind, Filter(Negate(is.null), species_rows))
+  species_abund_file <- paste0(output_prefix, "_vibrio_species_abundance.tsv")
+  write.table(species_abund, species_abund_file, sep="\t", quote=FALSE, row.names=FALSE)
+  cat("Vibrio species abundance written to:", species_abund_file, "\n")
+}
+
+# =============================================================================
+# summary
+# =============================================================================
 cat("\nClassification complete. Outputs:\n")
 cat("  ", taxonomy_table_file, "\n")
 cat("  ", confidence_file, "\n")
 cat("  ", counts_tax_file, "\n")
-if (method == "vibrio") cat("  ", blast_screen_file, "\n")
-cat("\nNext step: vc_hsp60_add_taxonomy.R will merge taxonomy and refseq into phyloseq RDS.\n")
+if (method == "vibrio") {
+  cat("  ", blast_screen_file, "\n")
+  cat("  ", vibrio_summary_file, "\n")
+  cat("  ", species_abund_file, "\n")
+}
+cat("\nNext step: vc_hsp60_add_taxonomy.R will produce two phyloseq RDS files.\n")
