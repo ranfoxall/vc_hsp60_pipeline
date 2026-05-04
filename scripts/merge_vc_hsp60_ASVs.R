@@ -1,131 +1,173 @@
 #!/usr/bin/env Rscript
 
-# ----------------------------
-# vc_hsp60 ASV Merge Script (fixed)
-# ----------------------------
+# merge_vc_hsp60_ASVs.R
+# Merges ASV count tables from multiple hsp60 sequencing runs.
+#
+# Merging is done by exact ASV sequence — identical sequences across runs
+# are treated as the same ASV and their counts are summed. New sequential
+# ASV numbers are assigned to the merged set. Outputs are named to match
+# the conventions expected by vc_hsp60_classify.R so classification can
+# be run directly on the merged dataset.
+#
 # Usage:
-# Rscript merge_vc_hsp60_ASVs.R <output_prefix> <counts_and_fasta_files...>
+#   Rscript merge_vc_hsp60_ASVs.R <output_prefix> \
+#     <run1_Counts_seqASV_b.tsv> <run1_ASVs.fa> \
+#     <run2_Counts_seqASV_b.tsv> <run2_ASVs.fa> \
+#     [<run3_Counts_seqASV_b.tsv> <run3_ASVs.fa> ...]
 #
 # Example:
-# Rscript merge_vc_hsp60_ASVs.R merged_test \
-#   test_plate1_Counts_seqASV_b.tsv test_plate1_ASVs.fa \
-#   test_plate2_Counts_seqASV_b.tsv test_plate2_ASVs.fa
-# ----------------------------
+#   Rscript merge_vc_hsp60_ASVs.R vcHsp60_merged \
+#     vcHsp60_old_redo_Counts_seqASV_b.tsv vcHsp60_old_redo_ASVs.fa \
+#     vcHsp60_MyRun4_Counts_seqASV_b.tsv vcHsp60_MyRun4_ASVs.fa
+#
+# Outputs:
+#   {prefix}_Counts_seqASV_b.tsv  — merged counts, ASV sequences as row names
+#   {prefix}_Counts_numASV.tsv    — merged counts, ASV_1/ASV_2/... as row names
+#   {prefix}_ASVs.fa              — merged FASTA with ASV_# headers
+#   {prefix}_phyloseq.rds         — phyloseq object (counts + sample metadata)
+#
+# Developer:  Randi Foxall
+# PI:         Dr. Cheryl Whistler
+# Funder:     Dr. Cheryl Whistler, Dr. Stephen Jones
+# Lab:        Whistler Lab, Dept. of Molecular, Cellular and Biomedical Sciences, UNH
+# Funding:    NHAES CREATE program, NH EPSCoR
+# License:    CC BY-NC 4.0
 
-library(dplyr)
-library(readr)
-library(tibble)
-
-args <- commandArgs(trailingOnly = TRUE)
-
-if(length(args) < 3 | length(args) %% 2 != 1){
-  stop("Usage: Rscript merge_vc_hsp60_ASVs.R <output_prefix> <counts_and_fasta_files...>")
-}
-
-prefix <- args[1]
-file_args <- args[-1]
-
-# ----------------------------
-# Separate counts and fasta paths
-# ----------------------------
-counts_files <- file_args[seq(1, length(file_args), by = 2)]
-fasta_files  <- file_args[seq(2, length(file_args), by = 2)]
-
-all_counts <- list()
-all_seqs   <- list()
-
-# ----------------------------
-# Read each plate/run
-# ----------------------------
-for(i in seq_along(counts_files)){
-  counts <- read.table(counts_files[i], header=TRUE, sep="\t", row.names=1, check.names=FALSE)
-  all_counts[[i]] <- counts
-
-  seqs <- readLines(fasta_files[i])
-  # Extract sequences from fasta (every 2nd line)
-  seq_lines <- seqs[seq(2, length(seqs), by=2)]
-  all_seqs[[i]] <- seq_lines
-}
-
-# ----------------------------
-# Merge counts by ASV sequence (clean headers)
-# ----------------------------
-all_counts_named <- lapply(seq_along(all_counts), function(i) {
-  df <- as.data.frame(all_counts[[i]]) %>% tibble::rownames_to_column("ASV_sequence")
-  # If columns are generic V1,V2..., rename to Sample1, Sample2...
-  if(all(grepl("^V", colnames(df)[-1]))) {
-    colnames(df)[-1] <- paste0("Sample", seq_len(ncol(df) - 1))
-  }
-  df
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tibble)
 })
 
+args <- commandArgs(trailingOnly=TRUE)
+
+if (length(args) < 3 || length(args) %% 2 != 1) {
+  stop(
+    "Usage: Rscript merge_vc_hsp60_ASVs.R <output_prefix> ",
+    "<counts1.tsv> <fasta1.fa> [<counts2.tsv> <fasta2.fa> ...]\n",
+    "Counts files must be sequence-based ASV tables (*_Counts_seqASV_b.tsv)"
+  )
+}
+
+prefix    <- args[1]
+file_args <- args[-1]
+
+counts_files <- file_args[seq(1, length(file_args), by=2)]
+fasta_files  <- file_args[seq(2, length(file_args), by=2)]
+
+cat("Merging", length(counts_files), "runs into prefix:", prefix, "\n")
+for (i in seq_along(counts_files)) {
+  cat("  Run", i, "—", counts_files[i], "/", fasta_files[i], "\n")
+}
+
+# [1] read and validate input files ------------------------------------
+all_counts <- list()
+
+for (i in seq_along(counts_files)) {
+  if (!file.exists(counts_files[i])) stop("Counts file not found: ", counts_files[i])
+  if (!file.exists(fasta_files[i]))  stop("FASTA file not found: ", fasta_files[i])
+
+  counts <- read.table(counts_files[i], header=TRUE, sep="\t",
+                       row.names=1, check.names=FALSE)
+  cat("Run", i, "—", nrow(counts), "ASVs,", ncol(counts), "samples\n")
+
+  # validate that row names look like sequences (not ASV_1 style)
+  if (any(grepl("^ASV_", rownames(counts)))) {
+    stop(
+      "Counts file ", counts_files[i], " appears to use numbered ASV IDs.\n",
+      "Please use the sequence-based counts table (*_Counts_seqASV_b.tsv)."
+    )
+  }
+
+  all_counts[[i]] <- counts
+}
+
+# [2] merge by sequence ------------------------------------------------
+# convert to long format with sequence as key, then full_join
+all_counts_named <- lapply(all_counts, function(df) {
+  tibble::rownames_to_column(as.data.frame(df), "ASV_sequence")
+})
+
+cat("Merging by ASV sequence...\n")
 merged_counts <- Reduce(function(x, y) {
-  full_join(x, y, by = "ASV_sequence")
+  full_join(x, y, by="ASV_sequence")
 }, all_counts_named)
 
 merged_counts[is.na(merged_counts)] <- 0
 
-# ASV sequences as rownames
-rownames(merged_counts) <- merged_counts$ASV_sequence
-merged_seqs <- rownames(merged_counts)
+# extract sequences before setting rownames
+merged_seqs                <- merged_counts$ASV_sequence
+rownames(merged_counts)    <- merged_seqs
 merged_counts$ASV_sequence <- NULL
 
-# ----------------------------
-# Write mergeable _b dataset (sequence as ID)
-# ----------------------------
-b_counts_file <- paste0(prefix, "_merged_ASVs_b.tsv")
-b_fasta_file  <- paste0(prefix, "_merged_ASVs_b.fa")
+cat("Merged table:", nrow(merged_counts), "unique ASVs,",
+    ncol(merged_counts), "total samples\n")
 
-# Counts table: rows = sequences, columns = sample names
-write.table(merged_counts, b_counts_file, sep="\t", quote=FALSE, col.names=NA, row.names=TRUE)
+# check for duplicate sample names across runs
+if (any(duplicated(colnames(merged_counts)))) {
+  dupes <- colnames(merged_counts)[duplicated(colnames(merged_counts))]
+  stop(
+    "Duplicate sample names found across runs: ",
+    paste(dupes, collapse=", "), "\n",
+    "Please rename samples in your input files to be unique."
+  )
+}
 
-# FASTA: >sequence as header, sequence as line
-fasta_lines_b <- unlist(lapply(merged_seqs, function(seq) c(paste0(">", seq), seq)))
-writeLines(fasta_lines_b, b_fasta_file)
+# [3] write sequence-based outputs ------------------------------------
+seq_counts_file <- paste0(prefix, "_Counts_seqASV_b.tsv")
+write.table(merged_counts, seq_counts_file, sep="\t",
+            quote=FALSE, col.names=NA, row.names=TRUE)
+cat("Sequence-based counts written to:", seq_counts_file, "\n")
 
-cat("Mergeable _b dataset written:\n", b_counts_file, "\n", b_fasta_file, "\n")
+# [4] assign new sequential ASV numbers --------------------------------
+asv_ids              <- paste0("ASV_", seq_len(nrow(merged_counts)))
+rownames(merged_counts) <- asv_ids
 
-# ----------------------------
-# Write numbered ASV dataset (_num)
-# ----------------------------
-num_counts_file <- paste0(prefix, "_merged_ASVs_num.tsv")
-num_fasta_file  <- paste0(prefix, "_merged_ASVs_num.fa")
+# [5] write numbered outputs -------------------------------------------
+num_counts_file <- paste0(prefix, "_Counts_numASV.tsv")
+write.table(merged_counts, num_counts_file, sep="\t",
+            quote=FALSE, col.names=NA, row.names=TRUE)
+cat("Numbered counts written to:", num_counts_file, "\n")
 
-# Create numbered ASVs
-num_ids <- paste0("ASV_", seq_len(nrow(merged_counts)))
-rownames(merged_counts) <- num_ids
-
-# Counts table with ASV_# rownames
-write.table(merged_counts, num_counts_file, sep="\t", quote=FALSE, col.names=NA, row.names=TRUE)
-
-# FASTA: >ASV_# as header, sequence as line
-fasta_lines_num <- unlist(lapply(seq_along(merged_seqs), function(i) {
-  c(paste0(">", num_ids[i]), merged_seqs[i])
+# [6] write FASTA ------------------------------------------------------
+asv_fasta_path <- paste0(prefix, "_ASVs.fa")
+fasta_lines    <- unlist(lapply(seq_along(asv_ids), function(i) {
+  c(paste0(">", asv_ids[i]), merged_seqs[i])
 }))
-writeLines(fasta_lines_num, num_fasta_file)
+writeLines(fasta_lines, asv_fasta_path)
+cat("FASTA written to:", asv_fasta_path, "\n")
 
-cat("Numbered ASV dataset written:\n", num_counts_file, "\n", num_fasta_file, "\n")
-
-# ----------------------------
-# Optional: create phyloseq RDS
-# ----------------------------
-if(requireNamespace("phyloseq", quietly = TRUE)){
+# [7] phyloseq object --------------------------------------------------
+if (requireNamespace("phyloseq", quietly=TRUE)) {
   library(phyloseq)
-
   counts_matrix <- as.matrix(merged_counts)
   mode(counts_matrix) <- "numeric"
 
-  # Simple sample metadata
-  sample_metadata <- data.frame(SampleID = colnames(counts_matrix),
-                                stringsAsFactors = FALSE)
-  rownames(sample_metadata) <- sample_metadata$SampleID
+  sample_metadata <- data.frame(
+    SampleID   = colnames(counts_matrix),
+    TotalReads = colSums(counts_matrix),
+    row.names  = colnames(counts_matrix),
+    stringsAsFactors = FALSE
+  )
 
-  ps <- phyloseq(otu_table(counts_matrix, taxa_are_rows = TRUE),
-                 sample_data(sample_metadata))
+  ps <- phyloseq(
+    otu_table(counts_matrix, taxa_are_rows=TRUE),
+    sample_data(sample_metadata)
+  )
 
-  phyloseq_file <- paste0(prefix, "_merged_phyloseq.rds")
-  saveRDS(ps, phyloseq_file)
-  cat("Phyloseq RDS written:", phyloseq_file, "\n")
+  ps_file <- paste0(prefix, "_phyloseq.rds")
+  saveRDS(ps, ps_file)
+  cat("Phyloseq RDS written to:", ps_file, "\n")
 } else {
-  cat("phyloseq not installed; skipping RDS creation.\n")
+  cat("phyloseq not installed — skipping RDS creation.\n")
 }
+
+# [8] summary ----------------------------------------------------------
+cat("\nMerge complete.\n")
+cat("Total unique ASVs:", nrow(merged_counts), "\n")
+cat("Total samples:    ", ncol(merged_counts), "\n")
+cat("\nOutputs:\n")
+cat("  ", seq_counts_file, "  (use for future merges)\n")
+cat("  ", num_counts_file, "\n")
+cat("  ", asv_fasta_path, "\n")
+if (exists("ps_file")) cat("  ", ps_file, "\n")
+cat("\nNext step: run vc_hsp60_classify.R with --output_prefix", prefix, "\n")

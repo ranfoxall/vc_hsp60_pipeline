@@ -417,6 +417,33 @@ if (method == "vibrio") {
     )
   })
   vibrio_summary      <- do.call(rbind, summary_rows)
+
+  # cross-reference with read tracking table if available
+  # adds true proportions of input reads (before filtering/merging)
+  track_file <- paste0(output_prefix, "_read_tracking.tsv")
+  if (file.exists(track_file)) {
+    cat("Read tracking table found — adding true input read proportions...\n")
+    track <- read.table(track_file, sep="\t", header=TRUE, stringsAsFactors=FALSE)
+    vibrio_summary <- merge(vibrio_summary,
+                             track[, c("sample", "reads_in", "nonchim")],
+                             by="sample", all.x=TRUE)
+    vibrio_summary$prop_vibrio_of_input  <- round(
+      vibrio_summary$combined_vibrio_reads / vibrio_summary$reads_in * 100, 2)
+    vibrio_summary$prop_vibrio_of_merged <- round(
+      vibrio_summary$combined_vibrio_reads / vibrio_summary$nonchim * 100, 2)
+    # reorder columns nicely
+    vibrio_summary <- vibrio_summary[, c(
+      "sample", "reads_in", "nonchim", "total_reads",
+      "vibrio_reads", "vibrio_universal_reads", "combined_vibrio_reads",
+      "non_vibrio_reads", "unassigned_reads",
+      "prop_vibrio", "prop_vibrio_of_input", "prop_vibrio_of_merged",
+      "vibrio_asv_count", "vibrio_species_count"
+    )]
+  } else {
+    cat("No read tracking table found — proportions are relative to phyloseq counts only.\n")
+    cat("To get true input read proportions, ensure", track_file, "is in the working directory.\n")
+  }
+
   vibrio_summary_file <- paste0(output_prefix, "_vibrio_summary.tsv")
   write.table(vibrio_summary, vibrio_summary_file, sep="\t", quote=FALSE, row.names=FALSE)
   cat("Vibrio summary written to:", vibrio_summary_file, "\n")

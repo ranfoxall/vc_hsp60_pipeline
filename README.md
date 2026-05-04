@@ -391,7 +391,11 @@ When using the vibrio method, `{prefix}_vibrio_summary.tsv` provides per-sample 
 | `combined_vibrio_reads` | Total Vibrio reads from both classifiers |
 | `non_vibrio_reads` | Classified non-Vibrio reads |
 | `unassigned_reads` | Reads with no taxonomy assignment |
-| `prop_vibrio` | Proportion of total reads that are Vibrio |
+| `prop_vibrio` | Proportion of phyloseq reads that are Vibrio |
+| `prop_vibrio_of_input` | Proportion of raw input reads that are Vibrio *(if read tracking table is present)* |
+| `prop_vibrio_of_merged` | Proportion of merged reads that are Vibrio *(if read tracking table is present)* |
+| `reads_in` | Raw input reads from pipeline *(if read tracking table is present)* |
+| `nonchim` | Merged reads from pipeline *(if read tracking table is present)* |
 | `vibrio_asv_count` | Number of Vibrio ASVs detected |
 | `vibrio_species_count` | Number of unique Vibrio species detected |
 
