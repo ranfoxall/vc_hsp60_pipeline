@@ -68,7 +68,7 @@ CONFIDENCE=0.7
 
 # Bases to trim from 5' end of reads to remove gene-specific primers
 # Set to 0 if primers are not present on your reads (e.g. _orig samples)
-# For Vib-hspF1/R400 primers: TRIM_LEFT_F=0, TRIM_LEFT_R=0
+# For Vib-hspF1/R400 primers: TRIM_LEFT_F=23, TRIM_LEFT_R=24
 TRIM_LEFT_F=0
 TRIM_LEFT_R=0
 
