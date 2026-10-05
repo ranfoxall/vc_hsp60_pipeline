@@ -37,7 +37,6 @@
 # License:    CC BY-NC 4.0
 
 suppressPackageStartupMessages({
-  library(phyloseq)
   library(dplyr)
 })
 
