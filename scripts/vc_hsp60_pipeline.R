@@ -175,26 +175,34 @@ cat(length(filtFs), "samples remain after filtering.\n")
 
 loessErrfun_mod <- function(trans) {
   qq  <- as.numeric(colnames(trans))
-  est <- matrix(0, nrow=16, ncol=length(qq))
-  rownames(est) <- paste0(rep(c("A","C","G","T"), each=4), "2",
-                          rep(c("A","C","G","T"), 4))
-  colnames(est) <- colnames(trans)
-  for (nti in c("A","C","G","T")) {
-    for (ntj in c("A","C","G","T")) {
+  est <- matrix(0, nrow = 0, ncol = length(qq))
+  for (nti in c("A", "C", "G", "T")) {
+    for (ntj in c("A", "C", "G", "T")) {
       if (nti != ntj) {
-        errs <- trans[paste0(nti,"2",ntj),]
-        tot  <- colSums(trans[paste0(nti,"2",c("A","C","G","T")),])
-        df   <- data.frame(q=qq, rlogp=log10((errs+1)/(tot+1)))
-        mod.lo <- loess(rlogp ~ q, df, span=0.95, degree=1)
-        pred   <- predict(mod.lo, qq)
-        pred[is.na(pred)] <- 0
-        est[paste0(nti,"2",ntj),] <- 10^pred
+        errs  <- trans[paste0(nti, "2", ntj), ]
+        tot   <- colSums(trans[paste0(nti, "2", c("A", "C", "G", "T")), ])
+        rlogp <- log10((errs + 1) / tot)
+        rlogp[is.infinite(rlogp)] <- NA
+        df  <- data.frame(q = qq, errs = errs, tot = tot, rlogp = rlogp)
+        fit <- loess(rlogp ~ q, df, weights = log10(tot), span = 2)
+        pred <- predict(fit, qq)
+        hi <- max(which(!is.na(pred))); lo <- min(which(!is.na(pred)))
+        pred[seq_along(pred) > hi] <- pred[[hi]]
+        pred[seq_along(pred) < lo] <- pred[[lo]]
+        est <- rbind(est, 10^pred)
       }
     }
   }
   est[est > 0.25] <- 0.25
   est[est < 1e-7] <- 1e-7
-  return(est)
+  est <- t(apply(est, 1, cummin))          # error rate must not rise with quality
+  err <- rbind(1 - colSums(est[1:3, ]), est[1:3, ],                       # A2A, A2C, A2G, A2T
+               est[4, ], 1 - colSums(est[4:6, ]), est[5:6, ],             # C2A, C2C, C2G, C2T
+               est[7:8, ], 1 - colSums(est[7:9, ]), est[9, ],             # G2A, G2C, G2G, G2T
+               est[10:12, ], 1 - colSums(est[10:12, ]))                   # T2A, T2C, T2G, T2T
+  rownames(err) <- paste0(rep(c("A", "C", "G", "T"), each = 4), "2", c("A", "C", "G", "T"))
+  colnames(err) <- colnames(trans)
+  err
 }
 
 error_fit_metric <- function(errObj) {
@@ -345,14 +353,10 @@ seqtab <- seqtab[, nchar(colnames(seqtab)) %in% target_range]
 cat("Sequences in target length range (343-475 bp):", ncol(seqtab), "\n")
 
 # [8] chimera removal --------------------------------------------------
-# chimera removal is skipped by default when samples from different primer sets
-# are processed together, as cross-primer comparisons produce false chimera calls.
-# filter non-target sequences downstream using taxonomy.
-# to enable chimera removal, uncomment the lines below and comment out the passthrough.
-#
-# seqtab_nochim <- removeBimeraDenovo(seqtab, method="consensus",
-#                                     multithread=TRUE, verbose=TRUE)
-# cat("Sequences after chimera removal:", ncol(seqtab_nochim), "\n")
+
+seqtab_nochim <- removeBimeraDenovo(seqtab, method="consensus",
+                                     multithread=TRUE, verbose=TRUE)
+cat("Sequences after chimera removal:", ncol(seqtab_nochim), "\n")
 seqtab_nochim <- seqtab
 cat("Chimera removal skipped — filter by taxonomy downstream.\n")
 cat("Sequences retained:", ncol(seqtab_nochim), "\n")
